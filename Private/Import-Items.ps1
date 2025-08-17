@@ -1,12 +1,9 @@
 function Import-Items {
     Param(
-        $AssetFieldsMap,
-        $AssetLayoutFields,
-        $ImportIcon,
+        $DocFieldsMap,
+        $DocTemplate,
         $ImportEnabled,
-        $HuduItemFilter,
-        $ImportAssetLayoutName,
-        $ItemSelect,
+        $NinjaOneItemFilter,
         $MigrationName,
         $ITGImports
     )
@@ -14,58 +11,64 @@ function Import-Items {
 
     $ImportsMigrated = 0
 
-    $ImportLayout = $null
+    $ImportTemplate = $null
 	
-    Write-Host "Processing $ImportAssetLayoutName"
+    Write-Host "Processing $($DocTemplate.name)"
 
     # Lets try to match Asset Layouts
-    $ImportLayout = Get-HuduAssetLayouts -name $ImportAssetLayoutName
+    $ImportTemplate = Invoke-NinjaOneRequest -Path "document-templates" -Method GET -QueryParams "templateName=$($DocTemplate.name)" | where-object { $_.name -eq $DocTemplate.name }
 	
-    if ($ImportLayout) {
-		
-        $HuduImports = Get-HuduAssets -assetlayoutid $ImportLayout.id
+    if ($ImportTemplate) {
         Write-Host "$MigrationName layout found attempting to match existing entries"
-        $MatchedImports = foreach ($itgimport in $ITGImports ) {
 
-            $HuduImport = $HuduImports | where-object -filter $HuduItemFilter
+        $OrgIDs = $CompaniesToMigrate.NinjaOneID -join ','
+        $NinjaOneImports = Invoke-NinjaOneRequest -Path "organization/documents" -Method GET -QueryParams "templateIds=$($ImportTemplate.id)&organizationId=s=$($OrgIDs)"
+
+        $MatchedImports = foreach ($itgimport in $ITGImports ) {
+            $NinjaOneOrgID = ($MatchedCompanies | Where-Object { $_.ITGID -eq $itgimport.attributes."organization-id" }).NinjaOneID
+            $NinjaOneImport = $NinjaOneImports | where-object -filter $NinjaOneItemFilter
 			
 	
-            if ($HuduImport) {
+            if ($NinjaOneImport) {
                 [PSCustomObject]@{
-                    "Name"        = $itgimport.attributes.name
-                    "CompanyName" = $itgimport.attributes."organization-name"
-                    "ITGID"       = $itgimport.id
-                    "HuduID"      = $HuduImport.id
-                    "Matched"     = $true
-                    "HuduObject"  = $HuduImport
-                    "ITGObject"   = $itgimport
-                    "Imported"    = "Pre-Existing"
+                    "Name"           = $itgimport.attributes.name
+                    "CompanyName"    = $itgimport.attributes."organization-name"
+                    "NinjaOneOrgID"  = $NinjaOneOrgID
+                    "ITGID"          = $itgimport.id
+                    "NinjaOneID"     = $NinjaOneImport.id
+                    "Matched"        = $true
+                    "NinjaOneObject" = $NinjaOneImport
+                    "ITGObject"      = $itgimport
+                    "Imported"       = "Pre-Existing"
 					
                 }
             } else {
                 [PSCustomObject]@{
-                    "Name"        = $itgimport.attributes.name
-                    "CompanyName" = $itgimport.attributes."organization-name"
-                    "ITGID"       = $itgimport.id
-                    "HuduID"      = ""
-                    "Matched"     = $false
-                    "HuduObject"  = ""
-                    "ITGObject"   = $itgimport
-                    "Imported"    = ""
+                    "Name"           = $itgimport.attributes.name
+                    "CompanyName"    = $itgimport.attributes."organization-name"
+                    "NinjaOneOrgID"  = $NinjaOneOrgID
+                    "ITGID"          = $itgimport.id
+                    "NinjaOneID"     = ""
+                    "Matched"        = $false
+                    "NinjaOneObject" = ""
+                    "ITGObject"      = $itgimport
+                    "Imported"       = ""
                 }
             }
         }
     } else {
         $MatchedImports = foreach ($itgimport in $ITGImports ) {
+            $NinjaOneOrgID = ($MatchedCompanies | Where-Object { $_.ITGID -eq $itgimport.attributes."organization-id" }).NinjaOneID
             [PSCustomObject]@{
-                "Name"        = $itgimport.attributes.name
-                "CompanyName" = $itgimport.attributes."organization-name"
-                "ITGID"       = $itgimport.id
-                "HuduID"      = ""
-                "Matched"     = $false
-                "HuduObject"  = ""
-                "ITGObject"   = $itgimport
-                "Imported"    = ""
+                "Name"           = $itgimport.attributes.name
+                "CompanyName"    = $itgimport.attributes."organization-name"
+                "NinjaOneOrgID"  = $NinjaOneOrgID
+                "ITGID"          = $itgimport.id
+                "NinjaOneID"     = ""
+                "Matched"        = $false
+                "NinjaOneObject" = ""
+                "ITGObject"      = $itgimport
+                "Imported"       = ""
             }
 		
         }
@@ -77,19 +80,12 @@ function Import-Items {
 	
     Write-Host "Unmatched $MigrationName"
     Write-Host $($MatchedImports | Sort-Object CompanyName | Where-Object { $_.Matched -eq $false } | Select-Object CompanyName, Name | Format-Table | Out-String)
-	
+
     # Import Items
     $UnmappedImportCount = ($MatchedImports | Where-Object { $_.Matched -eq $false } | measure-object).count
     if ($ImportEnabled -eq $true -and $UnmappedImportCount -gt 0) {
 		
-        if (!$ImportLayout) { 
-            Write-Host "Creating New Asset Layout $ImportAssetLayoutName"
-            $Null = New-HuduAssetLayout -name $ImportAssetLayoutName -icon $ImportIcon -color "#6e00d5" -icon_color "#ffffff" -include_passwords $true -include_photos $true -include_comments $true -include_files $true -fields $AssetLayoutFields
-            $ImportLayout = Get-HuduAssetLayouts -name $ImportAssetLayoutName
-	    # Activate Asset Layouts once Created
-	    $Null = Set-HuduAssetLayout -id $ImportLayout.id -Active $true
-		
-        }
+        $ImportTemplate = Invoke-NinjaOneDocumentTemplate -Template $DocTemplate
 	
         $ImportOption = Get-ImportMode -ImportName $MigrationName
 	
@@ -100,36 +96,59 @@ function Import-Items {
 	
                 foreach ($unmatchedImport in ($MatchedImports | Where-Object { $_.Matched -eq $false -and $company.ITGCompanyObject.id -eq $_."ITGObject".attributes."organization-id" })) {
 	
-                    $AssetFields = & $AssetFieldsMap
-
-					
+                    $DocumentFields = & $DocFieldsMap
 
                     Confirm-Import -ImportObjectName "$($unmatchedImport.Name): $($AssetFields | Out-String)" -ImportObject $unmatchedImport -ImportSetting $ImportOption
 	
                     Write-Host "Starting $($unmatchedImport.Name)"
+
+                    $CreateObject = [PSCustomObject]@{
+                        documentName        = $unmatchedImport.Name
+                        documentDescription = $unmatchedImport.Description ?? ""
+                        documentTemplateId  = $ImportTemplate.id
+                        organizationId      = $unmatchedImport.NinjaOneOrgID
+                        fields              = $DocumentFields
+                    }
+                    try {
+                        try {
+                            $NinjaOneNewImport = Invoke-NinjaOneRequest -Path "organization/documents" -Method POST -InputObject $CreateObject -AsArray -ea stop
+
+                            $unmatchedImport.matched = $true
+                            $unmatchedImport.NinjaOneID = $NinjaOneNewImport.id
+                            $unmatchedImport."NinjaOneObject" = $NinjaOneNewImport
+                            $unmatchedImport.Imported = "Created-By-Script"
+
+                        } catch {
+                            $unmatchedImport.matched = $false
+                            $unmatchedImport.NinjaOneID = $null
+                            $unmatchedImport."NinjaOneObject" = $Null
+                            $unmatchedImport.Imported = "Creation Failed - $_"
+
+                            Throw "Failed to create item $($unmatchedImport.Name): $_"
+                        }
+
+                        $ImportsMigrated = $ImportsMigrated + 1
 	
-                    $HuduAssetName = $($unmatchedImport.Name)
+                        Write-host "$($unmatchedImport.Name) Has been created in NinjaOne"
 					
-                    $HuduNewImport = (New-HuduAsset -name $HuduAssetName -company_id $company.HuduCompanyObject.ID -asset_layout_id $ImportLayout.id -fields $AssetFields).asset
-		    if ($itgimport.attributes.archived) {
-      			Write-Host "WARNING: $($HuduAssetName) is archived in ITGlue and is being archived in Hudu" -ForegroundColor Magenta
-      			$Null = Set-HuduAssetArchive -Id $HuduNewImport.id -CompanyId $HuduNewImport.company_id -Archive $false
-	 	 	}
+                        if ($itgimport.attributes.archived) {
+                            Write-Host "WARNING: $($unmatchedImport.name) is archived in ITGlue and is being archived in NinjaOne" -ForegroundColor Magenta
+                            try {
+                                $Null = Invoke-NinjaOneRequest -Path "organization/document/$($NinjaOneNewImport.id)/archive" -Method POST -ea stop
+                            } catch {
+                                Throw "Failed to archive item $($unmatchedImport.Name): $_"
+                            }
+                        }
 	
-                    $unmatchedImport.matched = $true
-                    $unmatchedImport.HuduID = $HuduNewImport.id
-                    $unmatchedImport."HuduObject" = $HuduNewImport
-                    $unmatchedImport.Imported = "Created-By-Script"
-	
-                    $ImportsMigrated = $ImportsMigrated + 1
-	
-                    Write-host "$($unmatchedImport.Name) Has been created in Hudu"
-                    Write-Host ""
+                        Write-Host ""
+                    } catch {
+                        Write-Error $_
+                    }
+
                 }
             }
         }
 			
-	
     } else {
         if ($UnmappedImportCount -eq 0) {
             Write-Host "All $MigrationName matched, no migration required" -foregroundcolor green

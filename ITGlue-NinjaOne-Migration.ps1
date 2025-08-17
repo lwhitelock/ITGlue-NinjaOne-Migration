@@ -5,6 +5,9 @@
 $FirstTimeLoad = 1
 
 ############################### Functions ###############################
+# Import NinjaOne Helper Functions
+. $PSScriptRoot\Public\Import-NinjaOneHelpers.ps1
+
 # Import ImageMagick for Invoke-ImageTest Function (Disabled)
 . $PSScriptRoot\Private\Initialize-ImageMagik.ps1
 
@@ -14,7 +17,7 @@ $FirstTimeLoad = 1
 # Confirm Object Import
 . $PSScriptRoot\Private\Confirm-Import.ps1
 
-# Matches items from IT Glue to Hudu and creates new items in Hudu
+# Matches items from IT Glue to NinjaONe and creates new items in NinjaONe
 . $PSScriptRoot\Private\Import-Items.ps1
 
 # Select Item Import Mode
@@ -266,19 +269,19 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Companies.json")) {
                 if ($PrimaryLocation -and $PrimaryLocation.count -eq 1) {
                     $OrgCreation = @{
                         name        = $unmatchedcompany.CompanyName
-                        description = $unmatchedcompany.ITGCompanyObject.attributes."description"
+                        description = ($unmatchedcompany.ITGCompanyObject.attributes."description").SubString(0, 999)
                         locations   = @(
                             @{
                                 name        = $PrimaryLocation.attributes."name"
                                 address     = (@($PrimaryLocation.attributes."address-1", $PrimaryLocation.attributes."address-2", $PrimaryLocation.attributes.city, $PrimaryLocation.attributes."region-name", $PrimaryLocation.attributes."postal-code", $PrimaryLocation.attributes."country-name") | Where-Object { $null -ne $_ }) -join "`r`n"
-                                description = $PrimaryLocation.attributes."notes"
+                                description = ($PrimaryLocation.attributes."notes").SubString(0, 249)
                             }
                         )
                     }
                 } else {
                     $OrgCreation = @{
                         name        = $unmatchedcompany.CompanyName
-                        description = $unmatchedcompany.ITGCompanyObject.attributes."description"
+                        description = ($unmatchedcompany.ITGCompanyObject.attributes."description").SubString(0, 999)
                     }
                 }
 
@@ -316,7 +319,6 @@ $CompaniesToMigrate = $MatchedCompanies | Sort-Object CompanyName | Where-Object
 
 $NinjaOneOrganizations = Invoke-NinjaOneRequest -Method GET -Path 'organizations'
 
-Read-Host "TEMP Companies done"
 
 ############################### Locations ###############################
 #Check for Location Resume
@@ -325,105 +327,104 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Locations.json")) {
     $MatchedLocations = Get-Content "$MigrationLogs\Locations.json" -raw | Out-String | ConvertFrom-Json -depth 100
 } else {
 
+    #Grab existing Locations in NinjaOne
+    $NinjaOneLocations = Invoke-NinjaOneRequest -Method GET -Path 'locations'
+
     $LocationsSelect = { (Get-ITGlueLocations -page_size 1000 -page_number $i -include related_items).data }
     $ITGLocations = Import-ITGlueItems -ItemSelect $LocationsSelect
 
-    $LocHuduItemFilter = { ($_.name -eq $itgimport.attributes.name -and $_.company_name -eq $itgimport.attributes."organization-name")`
-            -or ($ITGPrimaryLocationNames -contains $itgimport.attributes.name -and $HuduPrimaryLocationNames -contains $_.name -and $_.company_name -eq $itgimport.attributes."organization-name")`
-            -or ($itgimport.attributes.primary -eq $true -and $HuduPrimaryLocationNames -contains $_.name -and $_.company_name -eq $itgimport.attributes."organization-name") }
-
-    $LocImportEnabled = $ImportLocations
-
-    $LocMigrationName = "Locations"
-
-
-    $LocAssetLayoutFields = @(
-        @{
-            label        = 'Address 1'
-            field_type   = 'Text'
-            show_in_list = 'true'
-            position     = 1
-        },
-        @{
-            label        = 'Address 2'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 2
-        },
-        @{
-            label        = 'City'
-            field_type   = 'Text'
-            show_in_list = 'true'
-            position     = 3
-        },
-        @{
-            label        = 'Postal Code'
-            field_type   = 'Text'
-            show_in_list = 'true'
-            position     = 4
-        },
-        @{
-            label        = 'Region'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 5
-        },
-        @{
-            label        = 'Country'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 6
-        },
-        @{
-            label        = 'Phone'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 7
-        },
-        @{
-            label        = 'Fax'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 8
-        },
-        @{
-            label        = 'Notes'
-            field_type   = 'RichText'
-            show_in_list = 'false'
-            position     = 9
-        }
-    )
-
-
-
-    $LocAssetFieldsMap = { @{ 
-            'address_1'   = $unmatchedImport."ITGObject".attributes."address-1"
-            'address_2'   = $unmatchedImport."ITGObject".attributes."address-2"
-            'city'        = $unmatchedImport."ITGObject".attributes."city"
-            'postal_code' = $unmatchedImport."ITGObject".attributes."postal-code"
-            'region'      = $unmatchedImport."ITGObject".attributes."region-name"
-            'country'     = $unmatchedImport."ITGObject".attributes."country-name"
-            'phone'       = $unmatchedImport."ITGObject".attributes."phone"
-            'fax'         = $unmatchedImport."ITGObject".attributes."fax"
-            'notes'       = $unmatchedImport."ITGObject".attributes."notes"		
-        } }
-
-
-    $LocImportSplat = @{
-        AssetFieldsMap        = $LocAssetFieldsMap
-        AssetLayoutFields     = $LocAssetLayoutFields
-        ImportIcon            = $LocImportIcon
-        ImportEnabled         = $LocImportEnabled
-        HuduItemFilter        = $LocHuduItemFilter
-        ImportAssetLayoutName = $LocImportAssetLayoutName
-        ItemSelect            = $LocItemSelect
-        MigrationName         = $LocMigrationName
-        ITGImports            = $ITGLocations
-
+    Write-Host "$($ITGLocations.count) IT Glue Locations Found" 
+    if ($ScopedMigration) {
+        $OriginalLocationsCount = $($ITGLocations.count)
+        Write-Host "Setting locations to those in scope..." -foregroundcolor Yellow
+        $ITGLocations = $ITGLocations | Where-Object { $ScopedITGCompanyIds -contains $_.attributes.'organization-id' }
+        Write-Host "locations scoped... $OriginalLocationsCount => $($ITGLocations.count)"
     }
 
-    #Import Locations
-    $MatchedLocations = Import-Items @LocImportSplat
+    $MatchedLocations = foreach ($itglocation in $ITGLocations ) {
+
+        $NinjaOrgID = ($MatchedCompanies | Where-Object { $_.ITGID -eq $itglocation.attributes."organization-id" }).NinjaOneID
+
+        If ($null -eq $NinjaOrgID) {
+            Write-Error "Failed to find NinjaOne Organization ID: $itglocation"
+            Continue
+        }
+
+        $NinjaOneLocation = $NinjaOneLocations | where-object -filter { $_.name -eq $itglocation.attributes.name -and $_.organizationId -eq $NinjaOrgID }
+
+        if ($NinjaOneLocation) {
+            [PSCustomObject]@{
+                "Name"           = $itglocation.attributes.name
+                "CompanyName"    = $itglocation.attributes."organization-name"
+                "ITGID"          = $itglocation.id
+                "NinjaOneID"     = $NinjaOneLocation.id
+                "Matched"        = $true
+                "NinjaOneObject" = $NinjaOneLocation
+                "ITGObject"      = $itglocation
+                "Imported"       = "Pre-Existing"
+                "NinjaOneOrgID"  = $NinjaOrgID
+					
+            }
+        } else {
+            [PSCustomObject]@{
+                "Name"           = $itglocation.attributes.name
+                "CompanyName"    = $itglocation.attributes."organization-name"
+                "ITGID"          = $itglocation.id
+                "NinjaOneID"     = ""
+                "Matched"        = $false
+                "NinjaOneObject" = ""
+                "ITGObject"      = $itglocation
+                "Imported"       = ""
+                "NinjaOneOrgID"  = $NinjaOrgID
+            }
+        }
+    }
+
+    Write-Host "Matched Locations (Already exist so will not be migrated)"
+    $MatchedLocations | Sort-Object CompanyName, Name | Where-Object { $_.Matched -eq $true } | Select-Object CompanyName, Name | Format-Table
+
+    Write-Host "Unmatched Locations"
+    $MatchedLocations | Sort-Object CompanyName, Name | Where-Object { $_.Matched -eq $false } | Select-Object CompanyName, Name | Format-Table
+   
+    # Import Locations
+    $UnmappedLocationsCount = ($MatchedLocations | Where-Object { $_.Matched -eq $false } | measure-object).count
+    if ($ImportLocations -eq $true -and $UnmappedLocationsCount -gt 0) {
+	
+        $importLOption = Get-ImportMode -ImportName "Locations"
+	
+        if (($importLOption -eq "A") -or ($importLOption -eq "S") ) {		
+            foreach ($unmatchedlocation in ($MatchedLocations | Where-Object { $_.Matched -eq $false })) {
+                Confirm-Import -ImportObjectName $unmatchedlocation.CompanyName -ImportObject $unmatchedlocation -ImportSetting $importLOption
+                
+                Write-Host "Starting $($unmatchedlocation.Name)"
+                
+                $LocationCreation = @{
+                    name        = $unmatchedlocation.ITGObject.attributes."name"
+                    address     = (@($unmatchedlocation.ITGObject.attributes."address-1", $unmatchedlocation.ITGObject.attributes."address-2", $unmatchedlocation.ITGObject.attributes.city, $unmatchedlocation.ITGObject.attributes."region-name", $unmatchedlocation.ITGObject.attributes."postal-code", $unmatchedlocation.ITGObject.attributes."country-name") | Where-Object { $null -ne $_ }) -join "`r`n"
+                    description = $(try { ($unmatchedlocation.ITGObject.attributes."notes").SubString(0, 249) } catch { $null })
+                }
+                
+                $NinjaOneNewLocation = Invoke-NinjaOneRequest -Path "organization/$($unmatchedlocation.NinjaOneOrgID)/locations" -Method POST -InputObject $LocationCreation
+			
+                $unmatchedlocation.matched = $true
+                $unmatchedlocation.NinjaOneID = $NinjaOneNewLocation.id
+                $unmatchedlocation.NinjaOneObject = $NinjaOneNewLocation
+                $unmatchedlocation.Imported = "Created-By-Script"
+			
+                Write-host "$($unmatchedlocation.Name) Has been created in NinjaOne"
+                Write-Host ""
+            }
+		
+        }
+		
+    } else {
+        if ($UnmappedLocationsCount -eq 0) {
+            Write-Host "All Locations matched, no migration required" -foregroundcolor green
+        } else {
+            Write-Host "Warning Import Locations is set to disabled so the above unmatched locations will not have data migrated" -foregroundcolor red
+            Write-TimedMessage -Message "Press any key to continue or CTRL+C to quit" -DefaultResponse "continue and wrap-up locations, please." -Timeout 6
+        }
+    }
 
     # Save the results to resume from if needed
     $MatchedLocations | ConvertTo-Json -depth 100 | Out-File "$MigrationLogs\Locations.json"
@@ -432,16 +433,13 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Locations.json")) {
 }
 
 
-############################### Websites ###############################
+############################### Domains ###############################
 
 #Check for Website Resume
-if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Websites.json")) {
-    Write-Host "Loading Previous Websites Migration"
-    $MatchedWebsites = Get-Content "$MigrationLogs\Websites.json" -raw | Out-String | ConvertFrom-Json
+if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Domains.json")) {
+    Write-Host "Loading Previous Domains Migration"
+    $MatchedWebsites = Get-Content "$MigrationLogs\Domains.json" -raw | Out-String | ConvertFrom-Json
 } else {
-
-    #Grab existing Websites in Hudu
-    $HuduWebsites = Get-HuduWebsites
 
     #Import Websites
     Write-Host "Fetching Domains from IT Glue" -ForegroundColor Green
@@ -456,106 +454,69 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Websites.json")) {
 
     Write-Host "$($ITGDomains.count) ITG Glue Domains Found" 
 
-    $MatchedWebsites = foreach ($itgdomain in $ITGDomains ) {
-        $HuduWebsite = $HuduWebsites | where-object -filter { ($_.name -eq "https://$($itgdomain.attributes.name)" -and $_.company_name -eq $itgdomain.attributes."organization-name") }
+    $DomainNinjaOneItemFilter = { ($_.documentName -eq $itgimport.attributes.name -and $_.organizationId -eq $NinjaOneOrgID) }
 
-        if ($HuduWebsite) {
+    $DomainsImportEnabled = $ImportDomains
+
+    $DomainMigrationName = "Domains"
+
+    $DomainTemplate = [PSCustomObject]@{
+        name          = $DomainImportAssetLayoutName
+        allowMultiple = $true
+        fields        = @(
             [PSCustomObject]@{
-                "Name"       = $itgdomain.attributes.name
-                "ITGID"      = $itgdomain.id
-                "HuduID"     = $HuduWebsite.id
-                "Matched"    = $true
-                "HuduObject" = $HuduWebsite
-                "ITGObject"  = $itgdomain
-                "Imported"   = "Pre-Existing"
-
-            }
-        } else {
-            [PSCustomObject]@{
-                "Name"       = $itgdomain.attributes.name
-                "ITGID"      = $itgdomain.id
-                "HuduID"     = ""
-                "Matched"    = $false
-                "HuduObject" = ""
-                "ITGObject"  = $itgdomain
-                "Imported"   = ""
-            }
-        }
-    }
-
-
-    Write-Host "Matched Websites / Domains (Already exist so will not be migrated)"
-    $MatchedWebsites | Sort-Object Name | Where-Object { $_.Matched -eq $true } | Select-Object Name | Format-Table
-
-    Write-Host "Unmatched Websites / Domains"
-    $MatchedWebsites | Sort-Object Name | Where-Object { $_.Matched -eq $false } | Select-Object Name | Format-Table
-
-    $UnmappedWebsiteCount = ($MatchedWebsites | Where-Object { $_.Matched -eq $false } | measure-object).count
-
-    if ($ImportDomains -eq $true -and $UnmappedWebsiteCount -gt 0) {
-
-        $importOption = Get-ImportMode -ImportName "Websites / Domains"
-
-        if (($importOption -eq "A") -or ($importOption -eq "S") ) {		
-
-            foreach ($company in $CompaniesToMigrate) {
-                Write-Host "Migrating $($company.CompanyName)" -ForegroundColor Green
-
-                foreach ($unmatchedWebsite in ($MatchedWebsites | Where-Object { $_.Matched -eq $false -and $company.ITGCompanyObject.id -eq $_."ITGObject".attributes."organization-id" })) {
-				
-
-                    Confirm-Import -ImportObjectName "$($unmatchedWebsite.Name)" -ImportObject $unmatchedWebsite -ImportSetting $ImportOption
-
-                    Write-Host "Starting $($unmatchedWebsite.Name);"
-                    $HuduNewWebsite = New-HuduWebsite -name "https://$($unmatchedWebsite.ITGObject.attributes.name)" `
-                        -notes $unmatchedWebsite.ITGObject.attributes.notes `
-                        -paused $DisableWebsiteMonitoring `
-                        -companyid $company.HuduCompanyObject.ID `
-                        -DisableDNS $DisableWebsiteMonitoring.ToString().ToLower() `
-                        -DisableSSL $DisableWebsiteMonitoring.ToString().ToLower() `
-                        -DisableWhois $DisableWebsiteMonitoring.ToString().ToLower()
-
-
-                    $unmatchedWebsite.matched = $true
-                    $unmatchedWebsite.HuduID = $HuduNewWebsite.id
-                    $unmatchedWebsite."HuduObject" = $HuduNewWebsite
-                    $unmatchedWebsite.Imported = "Created-By-Script"
-
-                    $ImportsMigrated = $ImportsMigrated + 1
-
-                    Write-host "$($unmatchedWebsite.Name) Has been created in Hudu"
+                fieldLabel                = 'Notes'
+                fieldName                 = 'notes'
+                fieldType                 = 'WYSIWYG'
+                fieldTechnicianPermission = 'EDITABLE'
+                fieldScriptPermission     = 'READ_WRITE'
+                fieldApiPermission        = 'READ_WRITE'
+                fieldContent              = @{
+                    required         = $False
+                    advancedSettings = @{
+                        expandLargeValueOnRender = $True
+                    }
                 }
             }
-        }
-
-
-    } else {
-        if ($UnmappedWebsiteCount -eq 0) {
-            Write-Host "All $MigrationName matched, no migration required" -foregroundcolor green
-        } else {
-            Write-TimedMessage -Timeout 12 -Message "Warning Import Websites is set to disabled so the above unmatched Websites will not have data migrated... Press any key to continue or CTRL+C to quit"  -DefaultResponse "continue and wrap-up Websites, please."
-        }
+        )
     }
 
+
+    $DomainDocFieldsMap = { @{
+            'notes' = @{ 'html' = $unmatchedImport."ITGObject".attributes."notes" ?? "" } 
+        } }
+    
+
+
+    $DomainImportSplat = @{
+        DocFieldsMap       = $DomainDocFieldsMap
+        DocTemplate        = $DomainTemplate
+        ImportEnabled      = $DomainsImportEnabled
+        NinjaOneItemFilter = $DomainNinjaOneItemFilter
+        MigrationName      = $DomainMigrationName
+        ITGImports         = $ITGDomains
+    }
+
+    #Import Domains
+    $MatchedDomains = Import-Items @DomainImportSplat
+
+    Write-Host "Doamins Complete"
+
     # Save the results to resume from if needed
-    $MatchedWebsites | ConvertTo-Json -depth 100 | Out-File "$MigrationLogs\Websites.json"
-    Write-TimedMessage -Timeout 3 -Message  "Snapshot Point: Websites Migrated Continue?"  -DefaultResponse "continue to Configurations, please."
+    $MatchedDomains | ConvertTo-Json -depth 100 | Out-File "$MigrationLogs\Domains.json"
+    Write-TimedMessage -Timeout 3 -Message "Snapshot Point: Domains Migrated Continue?"  -DefaultResponse "continue to Configurations, please."
 
 }
-
-
 
 
 		
 ############################### Configurations ###############################
 	
-$ConfigMigrationName = "Configurations"
-$ConfigImportAssetLayoutName = "Configurations"
 	
 #Check for Configuration Resume
-if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Configurations.json")) {
+if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Devices.json")) {
     Write-Host "Loading Previous Configurations Migration"
-    $MatchedConfigurations = Get-Content "$MigrationLogs\Configurations.json" -raw | Out-String | ConvertFrom-Json -depth 100
+    $MatchedConfigurations = Get-Content "$MigrationLogs\Devices.json" -raw | Out-String | ConvertFrom-Json -depth 100
 } else {
 
     #Get Configurations from IT Glue
@@ -569,295 +530,153 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Configurations.json")
         Write-Host "configurations scoped... $OriginalConfigurationCount => $($ITGConfigurations.count)"
     }
 
-    $ConfigAssetLayoutFields = @(
-        @{
-            label        = 'Hostname'
-            field_type   = 'Text'
-            show_in_list = 'true'
-            position     = 1
-        },
-        @{
-            label        = 'Primary IP'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 2
-        },
-        @{
-            label        = 'MAC Address'
-            field_type   = 'Text'
-            show_in_list = 'true'
-            position     = 3
-        },
-        @{
-            label        = 'Default Gateway'
-            field_type   = 'Text'
-            show_in_list = 'true'
-            position     = 4
-        },
-        @{
-            label        = 'Serial Number'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 5
-        },
-        @{
-            label        = 'Asset Tag'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 6
-        },
-        @{
-            label        = 'Position'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 7
-        },
-        @{
-            label        = 'Installed By'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 8
-        },
-        @{
-            label        = 'Purchased By'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 9
-        },
-        @{
-            label        = 'Notes'
-            field_type   = 'RichText'
-            show_in_list = 'false'
-            position     = 10
-        },
-        @{
-            label        = 'Operating System Notes'
-            field_type   = 'RichText'
-            show_in_list = 'false'
-            position     = 11
-        },
-        @{
-            label        = 'Warranty Expires At'
-            field_type   = 'Date'
-            expiration   = 'true'
-            show_in_list = 'false'
-            position     = 12
-        },
-        @{
-            label        = 'Installed At'
-            field_type   = 'Date'
-            show_in_list = 'false'
-            position     = 13
-        },
-        @{
-            label        = 'Purchased At'
-            field_type   = 'Date'
-            show_in_list = 'false'
-            position     = 14
-        },
-        @{
-            label        = 'Configuration Type Name'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 15
-        },
-        @{
-            label        = 'Configuration Type Kind'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 16
-        },
-        @{
-            label        = 'Configuration Status Name'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 17
-        },
-        @{
-            label        = 'Manufacturer Name'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 18
-        },
-        @{
-            label        = 'Model ID'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 19
-        },
-        @{
-            label        = 'Operating System Name'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 20
-        },
-        @{
-            label        = 'Location Name'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 21
-        },
-        @{
-            label        = 'Model Name'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 22
-        },
-        @{
-            label        = 'Contact Name'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 23
+    $NinjaOneDevices = Invoke-NinjaOneRequest -Method GET -Path 'devices'
+    $NinjaOneLocations = Invoke-NinjaOneRequest -Method GET -Path 'locations'
+
+    $MatchedDevices = foreach ($itgconfiguration in $ITGConfigurations ) {
+
+        $NinjaOrgID = ($MatchedCompanies | Where-Object { $_.ITGID -eq $itgconfiguration.attributes."organization-id" }).NinjaOneID
+
+        If ($null -eq $NinjaOrgID) {
+            Write-Error "Failed to find NinjaOne Organization ID: $itgconfiguration"
+            Continue
         }
-    )
-
-
-    $ConfigHuduItemFilter = { ($_.name -eq $itgimport.attributes.name -and $_.company_name -eq $itgimport.attributes."organization-name") }
-	
-    $ConfigImportEnabled = $ImportConfigurations
-
-	
-    $ConfigAssetFieldsMap = { @{ 
-            # 'name'                      = $unmatchedImport."ITGObject".attributes."name"
-            'hostname'                  = $unmatchedImport."ITGObject".attributes."hostname"
-            'primary_ip'                = $unmatchedImport."ITGObject".attributes."primary-ip"
-            'mac_address'               = $unmatchedImport."ITGObject".attributes."mac-address"
-            'default_gateway'           = $unmatchedImport."ITGObject".attributes."default-gateway"
-            'serial_number'             = $unmatchedImport."ITGObject".attributes."serial-number"
-            'asset_tag'                 = $unmatchedImport."ITGObject".attributes."asset-tag"
-            'position'                  = $unmatchedImport."ITGObject".attributes."position"
-            'installed_by'              = $unmatchedImport."ITGObject".attributes."installed-by"
-            'purchased_by'              = $unmatchedImport."ITGObject".attributes."purchased-by"
-            'notes'                     = $unmatchedImport."ITGObject".attributes."notes"
-            'operating_system_notes'    = $unmatchedImport."ITGObject".attributes."operating-system-notes"
-            'warranty_expires_at'       = $unmatchedImport."ITGObject".attributes."warranty-expires-at"
-            'installed_at'              = $unmatchedImport."ITGObject".attributes."installed-at"
-            'purchased_at'              = $unmatchedImport."ITGObject".attributes."purchased-at"
-            # 'created_at'                = $unmatchedImport."ITGObject".attributes."created-at"
-            # 'updated_at'                = $unmatchedImport."ITGObject".attributes."updated-at"
-            'configuration_type_name'   = $unmatchedImport."ITGObject".attributes."configuration-type-name"
-            'configuration_type_kind'   = $unmatchedImport."ITGObject".attributes."configuration-type-kind"
-            'configuration_status_name' = $unmatchedImport."ITGObject".attributes."configuration-status-name"
-            'operating_system_name'     = $unmatchedImport."ITGObject".attributes."operating-system-name"
-            'location_name'             = $unmatchedImport."ITGObject".attributes."location-name"
-            'model_name'                = $unmatchedImport."ITGObject".attributes."model-name"
-            'contact_name'              = $unmatchedImport."ITGObject".attributes."contact-name"	
-        } }
-
-
-    # First we need to decide on if we are going to do one Asset type or many
-    Write-Host "Hudu does not have the same standard configuration type as IT Glue."
-    Write-Host "With the migration there are a few options of how to approach this"
-    Write-Host "1) The script can create a new Hudu Asset Layout for all configurations to go into, like how IT Glue works"
-    Write-Host "2) The script can create an Asset layout for each in use Configuration Type you have in IT Glue and then split up configurations into them"
-    Write-Host "3) The script can prompt for each Configuration type you have, asking you for the new Hudu Asset Layout to map to, this will allow you to have a mix of 1 and 2"
-
-    $ConfigurationOption = Get-ConfigurationsImportMode
-
-    # All Configurations to 1 Layout
-    if ($ConfigurationOption -eq 1) {
-	
-	
-
-        $ConfigImportSplat = @{
-            AssetFieldsMap        = $ConfigAssetFieldsMap
-            AssetLayoutFields     = $ConfigAssetLayoutFields
-            ImportIcon            = $ConfigImportIcon
-            ImportEnabled         = $ConfigImportEnabled
-            HuduItemFilter        = $ConfigHuduItemFilter
-            ImportAssetLayoutName = $ConfigImportAssetLayoutName
-            ItemSelect            = $ConfigItemSelect
-            MigrationName         = $ConfigMigrationName
-            ITGImports            = $ITGConfigurations
+        
+        try {
+            $NinjaOneLocationID = (($MatchedLocations | where-object -filter { ($_.ITGID -eq $itgconfiguration.attributes."location-id" -or $null -eq $itgconfiguration.attributes."location-id") -and $_.NinjaOneOrgID -eq $NinjaOrgID }).NinjaOneID)[0]
+        } catch {
+            $NinjaOneLocationID = (($NinjaOneLocations | Where-Object { $_.organizationId -eq $NinjaOrgID }).id)[0]
         }
 
-        $MatchedConfigurations = Import-Items @ConfigImportSplat
+        If ($null -eq $NinjaOneLocationID) {
+            Write-Error "Failed to find NinjaOne Location ID: $itgconfiguration"
+            Continue
+        }
 
+        $NinjaOneDevice = $NinjaOneDevices | Where-Object { ($_.systemName -eq $itgconfiguration.attributes.name -or $_.displayName -eq $itgconfiguration.attributes.name) -and $_.organizationId -eq $NinjaOrgID }
 
-    } elseif ($ConfigurationOption -eq 2) {
-        $ITGConfigTypes = $ITGConfigurations.attributes."configuration-type-name" | Select-Object -unique
-        $MatchedConfigurations = New-Object System.Collections.ArrayList
-        foreach ($ConfigType in $ITGConfigTypes) {
-
-            Write-Host "Processing $ConfigType"
-
-            $ParsedITGConfigs = $ITGConfigurations | Where-Object -filter { $_.attributes."configuration-type-name" -eq $ConfigType }
-
-            $ConfigMigrationName = "$($ConfigurationPrefix)$($ConfigType)"
-            $ConfigImportAssetLayoutName = "$($ConfigurationPrefix)$($ConfigType)"
-	
-            $ConfigImportSplat = @{
-                AssetFieldsMap        = $ConfigAssetFieldsMap
-                AssetLayoutFields     = $ConfigAssetLayoutFields
-                ImportIcon            = $ConfigImportIcon
-                ImportEnabled         = $ConfigImportEnabled
-                HuduItemFilter        = $ConfigHuduItemFilter
-                ImportAssetLayoutName = $ConfigImportAssetLayoutName
-                ItemSelect            = $ConfigItemSelect
-                MigrationName         = $ConfigMigrationName
-                ITGImports            = $ParsedITGConfigs
+        if ($NinjaOneDevice) {
+            [PSCustomObject]@{
+                "Name"           = $itgconfiguration.attributes.name
+                "CompanyName"    = $itgconfiguration.attributes."organization-name"
+                "ITGID"          = $itgconfiguration.id
+                "NinjaOneID"     = $NinjaOneDevice.id
+                "Matched"        = $true
+                "NinjaOneObject" = $NinjaOneDevice
+                "ITGObject"      = $itgconfiguration
+                "Imported"       = "Pre-Existing"
+                "NinjaOneOrgID"  = $NinjaOrgID
+                "NinjaOneLocID"  = $NinjaOneDevice.locationId
+					
             }
-	
-            $ReturnedConfigurations = Import-Items @ConfigImportSplat
-
-            if (($ReturnedConfigurations | measure-object).count -gt 1) {
-                $MatchedConfigurations.addrange($ReturnedConfigurations)
-            } else {
-                $MatchedConfigurations.add($ReturnedConfigurations)
+        } else {
+            [PSCustomObject]@{
+                "Name"           = $itgconfiguration.attributes.name
+                "CompanyName"    = $itgconfiguration.attributes."organization-name"
+                "ITGID"          = $itgconfiguration.id
+                "NinjaOneID"     = ""
+                "Matched"        = $false
+                "NinjaOneObject" = ""
+                "ITGObject"      = $itgconfiguration
+                "Imported"       = ""
+                "NinjaOneOrgID"  = $NinjaOrgID
+                "NinjaOneLocID"  = $NinjaOneLocationID
             }
-
         }
+    }
 
-	
-	
-    } elseif ($ConfigurationOption -eq 3) {
-        $ITGConfigTypes = $ITGConfigurations.attributes."configuration-type-name" | Select-Object -unique
+    Write-Host "Matched Devices (Already exist so will not be migrated)"
+    $MatchedDevices | Sort-Object CompanyName, Name | Where-Object { $_.Matched -eq $true } | Select-Object CompanyName, Name, NinjaOneOrgID, NinjaOneLocID | Format-Table
+
+    Write-Host "Unmatched Devices"
+    $MatchedDevices | Sort-Object CompanyName, Name | Where-Object { $_.Matched -eq $false } | Select-Object CompanyName, Name, NinjaOneOrgID, NinjaOneLocID | Format-Table
+
+
+    
+   
+    # Import Devices
+    $UnmappedConfigurationssCount = ($MatchedDevices | Where-Object { $_.Matched -eq $false } | measure-object).count
+    if ($ImportConfigurations -eq $true -and $UnmappedConfigurationssCount -gt 0) {        
+        $ITGConfigTypes = ($MatchedDevices | Where-Object { $_.Matched -eq $false }).ITGObject.attributes."configuration-type-name" | Select-Object -unique
         $MatchedConfigurations = New-Object System.Collections.ArrayList
 
-        foreach ($ConfigType in $ITGConfigTypes) {
-            Write-Host ""
-            Write-Host "Processing $ConfigType"
-            Write-Host "Please provide the Asset Layout name for $ConfigType in Hudu." -foregroundcolor green
-            $ConfigImportAssetLayoutName = $(Write-TimedMessage -Timeout 12 -Message "Please enter layout name" -DefaultResponse $ConfigType)
-		
+        $NinjaOneRoles = Invoke-NinjaOneRequest -Method GET -Path 'roles' | Where-Object { $_.nodeClass -eq 'UNMANAGED_DEVICE' -and $_.name -ne 'UNMANAGED_DEVICE' }
 
-            $ParsedITGConfigs = $ITGConfigurations | Where-Object -filter { $_.attributes."configuration-type-name" -eq $ConfigType }
+        if (($NinjaOneRoles | Measure-Object).count -lt 1) {
+            Write-Error "No Unmanaged Device Roles were found. Devices cannot be imported without unmanaged roles."
+            Read-Host "Press any key to continue or CTRL+C to quit"
+            $importDeviceOption = 'NoRoles'
+        } else {
+            $importDeviceOption = Get-ImportMode -ImportName "Configurations"
+        }
 
-            $ConfigMigrationName = $ConfigImportAssetLayoutName
+        $RoleMap = [PSCustomObject]@{}
+
+        
+
+        if (($importDeviceOption -eq "A") -or ($importDeviceOption -eq "S") ) {		
+
+            foreach ($ConfigType in $ITGConfigTypes) {
+                Write-Host ""
+                Write-Host "Mapping Configuration type $ConfigType to NinjaOne Unmanaged Device Role"
+                Write-Host "$($NinjaOneRoles | Select-Object id, name | Format-Table | Out-String)"
+                $RoleFound = $False
+                do {
+                    $MapValue = Read-Host "Please enter the ID of the NinjaOne Unmanaged Device Role for the Configuration Type $ConfigType"
+                    if ($MapValue -in $NinjaOneRoles.ID) {
+                        $RoleFound = $True
+                    } else {
+                        Write-Error "Please enter a valid NinjaOne Unmanaged Device Role ID"
+                    }
+                } while ($RoleFound = $False)
+
+                $RoleMap | Add-Member -Name $ConfigType -Value $MapValue -MemberType NoteProperty
+
+            }
+	
+        
+            foreach ($unmatcheddevice in ($MatchedDevices | Where-Object { $_.Matched -eq $false })) {
+                Confirm-Import -ImportObjectName $unmatcheddevice.name -ImportObject $unmatcheddevice -ImportSetting $importDeviceOption
+                
+                Write-Host "Starting $($unmatcheddevice.Name)"
+                
+                $DeviceCreation = @{
+                    name                = $unmatcheddevice.ITGObject.attributes."name"
+                    orgId               = $unmatcheddevice.NinjaOneOrgID
+                    locationId          = $unmatcheddevice.NinjaOneLocID
+                    roleId              = $RoleMap."$($unmatcheddevice."ITGObject".attributes."configuration-type-name")"
+                    # TEMP 'serialNumber'      = $unmatcheddevice."ITGObject".attributes."serial-number" ?? ""
+                    'warrantyEndDate'   = $(try { (Get-NinjaOneTime -Seconds -Date "$($unmatcheddevice."ITGObject".attributes."warranty-expires-at")" -ea stop) }catch { "" })
+                    'warrantyStartDate' = $(try { (Get-NinjaOneTime -Seconds -Date "$($unmatcheddevice."ITGObject".attributes."purchased-at")" -ea stop) }catch { "" })
+                }
+                
+                $NewNinjaOneDevice = Invoke-NinjaOneRequest -Path "itam/unmanaged-device" -Method POST -InputObject $DeviceCreation
 			
-            $ConfigImportSplat = @{
-                AssetFieldsMap        = $ConfigAssetFieldsMap
-                AssetLayoutFields     = $ConfigAssetLayoutFields
-                ImportIcon            = $ConfigImportIcon
-                ImportEnabled         = $ConfigImportEnabled
-                HuduItemFilter        = $ConfigHuduItemFilter
-                ImportAssetLayoutName = $ConfigImportAssetLayoutName
-                ItemSelect            = $ConfigItemSelect
-                MigrationName         = $ConfigMigrationName
-                ITGImports            = $ParsedITGConfigs
+                $unmatcheddevice.matched = $true
+                $unmatcheddevice.NinjaOneID = $NewNinjaOneDevice.id
+                $unmatcheddevice.NinjaOneObject = $NewNinjaOneDevice
+                $unmatcheddevice.Imported = "Created-By-Script"
+			
+                Write-host "$($unmatcheddevice.Name) Has been created in NinjaOne"
+                Write-Host ""
             }
-	
-            $ReturnedConfigurations = Import-Items @ConfigImportSplat
-            if (($ReturnedConfigurations | measure-object).count -gt 1) {
-                $MatchedConfigurations.addrange($ReturnedConfigurations)
-            } else {
-                $MatchedConfigurations.add($ReturnedConfigurations)
-            }
+		
         }
-
-
-
+		
     } else {
-        Write-Error "This should never have happened some how you selected something other than 1, 2 or 3 :/"
-        exit 1
+        if ($UnmappedConfigurationssCount -eq 0) {
+            Write-Host "All Devices matched, no migration required" -foregroundcolor green
+        } else {
+            Write-Host "Warning Import Configurations is set to disabled so the above unmatched Configurations will not have data migrated" -foregroundcolor red
+            Write-TimedMessage -Message "Press any key to continue or CTRL+C to quit" -DefaultResponse "continue and wrap-up configurations, please." -Timeout 6
+        }
     }
 
     # Save the results to resume from if needed
-    $MatchedConfigurations | ConvertTo-Json -depth 100 | Out-File "$MigrationLogs\Configurations.json"
+    $MatchedDevices | ConvertTo-Json -depth 100 | Out-File "$MigrationLogs\Devices.json"
     Write-TimedMessage -Timeout 3 -Message "Snapshot Point: Configurations Migrated Continue?"  -DefaultResponse "continue to Contacts, please."
 
 }
-
 
 ############################### Contacts ###############################
 #Check for Location Resume
@@ -865,7 +684,6 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Contacts.json")) {
     Write-Host "Loading Previous Contacts Migration"
     $MatchedContacts = Get-Content "$MigrationLogs\Contacts.json" -raw | Out-String | ConvertFrom-Json -depth 100
 } else {
-
 
     Write-Host "Fetching Contacts from IT Glue" -ForegroundColor Green
     $ContactsSelect = { (Get-ITGlueContacts -page_size 1000 -page_number $i -include related_items).data }
@@ -878,111 +696,189 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Contacts.json")) {
     }
     #($ITGContacts.attributes | sort-object -property name, "organization-name" -Unique)
 
-    $ConHuduItemFilter = { ($_.name -eq $itgimport.attributes.name -and $_.company_name -eq $itgimport.attributes."organization-name") }
+    $NinjaOneUsers = Invoke-NinjaOneRequest -Method GET -Path 'users'
 
-    $ConImportEnabled = $ImportContacts
+    $MatchedContacts = foreach ($itgcontact in $ITGContacts ) {
 
-    $ConMigrationName = "Contacts"
+        $NinjaOrgID = ($MatchedCompanies | Where-Object { $_.ITGID -eq $itgconfiguration.attributes."organization-id" }).NinjaOneID
 
-    $LocationLayout = Get-HuduAssetLayouts -name $LocImportAssetLayoutName
-
-    $ConAssetLayoutFields = @(
-        @{
-            label        = 'First Name'
-            field_type   = 'Text'
-            show_in_list = 'true'
-            position     = 1
-        },
-        @{
-            label        = 'Last Name'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 2
-        },
-        @{
-            label        = 'Title'
-            field_type   = 'Text'
-            show_in_list = 'true'
-            position     = 3
-        },
-        @{
-            label        = 'Contact Type'
-            field_type   = 'Text'
-            show_in_list = 'true'
-            position     = 4
-        },
-        @{
-            label        = 'Location'
-            field_type   = 'AssetTag'
-            show_in_list = 'false'
-            linkable_id  = $LocationLayout.ID
-            position     = 5
-        },
-        @{
-            label        = 'Important'
-            field_type   = 'Text'
-            show_in_list = 'false'
-            position     = 6
-        },
-        @{
-            label        = 'Notes'
-            field_type   = 'RichText'
-            show_in_list = 'false'
-            position     = 7
-        },
-        @{
-            label        = 'Emails'
-            field_type   = 'RichText'
-            show_in_list = 'false'
-            position     = 8
-        },
-        @{
-            label        = 'Phones'
-            field_type   = 'RichText'
-            show_in_list = 'false'
-            position     = 9
+        If ($null -eq $NinjaOrgID) {
+            Write-Error "Failed to find NinjaOne Organization ID: $itgconfiguration"
+            Continue
         }
-    )
 
+        $PrimaryEmail = ($itgcontact.attributes."contact-emails" | Where-Object { $_.primary -eq $True }).value
 
+        if ($null -eq $PrimaryEmail) {
+            Write-Error "$($itgcontact.attributes."organization-name") - $($itgcontact.attributes.name) Cannot be migrated as they have no email address in IT Glue"
+            continue
+        }
 
-    $ConAssetFieldsMap = { @{ 
-            'first_name'   = $unmatchedImport."ITGObject".attributes."first-name"
-            'last_name'    = $unmatchedImport."ITGObject".attributes."last-name"
-            'title'        = $unmatchedImport."ITGObject".attributes."title"
-            'contact_type' = $unmatchedImport."ITGObject".attributes."contact-type-name"
-            'location'     = "[$($MatchedLocations | where-object -filter {$_.ITGID -eq $unmatchedImport."ITGObject".attributes."location-id"} | Select-Object @{N='id';E={$_.HuduID}}, @{N='name';E={$_.Name}} | convertto-json -compress | out-string)]" -replace "`r`n", ""
-            'important'    = $unmatchedImport."ITGObject".attributes."important"
-            'notes'        = $unmatchedImport."ITGObject".attributes."notes"
-            'emails'       = $unmatchedImport."ITGObject".attributes."contact-emails" | convertto-html -fragment | out-string
-            'phones'       = $unmatchedImport."ITGObject".attributes."contact-phones"	| convertto-html -fragment | out-string
-        } }
+        $NinjaOneUser = $NinjaOneUsers | Where-Object { $_.email -eq $PrimaryEmail }
 
-
-    $ConImportSplat = @{
-        AssetFieldsMap        = $ConAssetFieldsMap
-        AssetLayoutFields     = $ConAssetLayoutFields
-        ImportIcon            = $ConImportIcon
-        ImportEnabled         = $ConImportEnabled
-        HuduItemFilter        = $ConHuduItemFilter
-        ImportAssetLayoutName = $ConImportAssetLayoutName
-        ItemSelect            = $ConItemSelect
-        MigrationName         = $ConMigrationName
-        ITGImports            = $ITGContacts
-
+        
+        if ($NinjaOneUser) {
+            [PSCustomObject]@{
+                "Name"           = $itgcontact.attributes.name
+                "CompanyName"    = $itgcontact.attributes."organization-name"
+                "ITGID"          = $itgcontact.id
+                "NinjaOneID"     = $NinjaOneUser.id
+                "Matched"        = $true
+                "NinjaOneObject" = $NinjaOneUser
+                "ITGObject"      = $itgcontact
+                "Imported"       = "Pre-Existing"
+                "NinjaOneOrgID"  = $NinjaOrgID
+                "PrimaryEmail"   = $PrimaryEmail	
+            }
+        } else {
+            [PSCustomObject]@{
+                "Name"           = $itgcontact.attributes.name
+                "CompanyName"    = $itgcontact.attributes."organization-name"
+                "ITGID"          = $itgcontact.id
+                "NinjaOneID"     = ""
+                "Matched"        = $false
+                "NinjaOneObject" = ""
+                "ITGObject"      = $itgcontact
+                "Imported"       = ""
+                "NinjaOneOrgID"  = $NinjaOrgID
+                "PrimaryEmail"   = $PrimaryEmail	
+            }
+        }
     }
 
-    #Import Locations
-    $MatchedContacts = Import-Items @ConImportSplat
+    Write-Host "Matched Contacts (Already exist so will not be migrated)"
+    $MatchedContacts | Sort-Object CompanyName, Name | Where-Object { $_.Matched -eq $true } | Select-Object CompanyName, Name, PrimaryEmail | Format-Table
 
+    Write-Host "Unmatched Contacts"
+    $MatchedContacts | Sort-Object CompanyName, Name | Where-Object { $_.Matched -eq $false } | Select-Object CompanyName, Name, PrimaryEmail | Format-Table
+
+
+    # Import Devices
+    $UnmappedContactsCount = ($MatchedContacts | Where-Object { $_.Matched -eq $false } | measure-object).count
+    if ($ImportContacts -eq $true -and $UnmappedContactsCount -gt 0) {        
+        
+        $importContactOption = Get-ImportMode -ImportName "contacts"
+
+        if (($importContactOption -eq "A") -or ($importContactOption -eq "S") ) {		
+
+      
+            foreach ($unmatchedcontact in ($MatchedContacts | Where-Object { $_.Matched -eq $false })) {
+                Confirm-Import -ImportObjectName $unmatchedcontact.name -ImportObject $unmatchedcontact -ImportSetting $importContactOption
+                
+                Write-Host "Starting $($unmatchedcontact.Name)"
+                
+                $ContactCreation = @{
+                    firstName        = $unmatchedcontact."ITGObject".attributes."first-name" ?? 'N/A'
+                    lastName         = $unmatchedcontact."ITGObject".attributes."last-name" ?? 'N/A'
+                    email            = $unmatchedcontact.PrimaryEmail
+                    phone            = ($unmatchedcontact."ITGObject".attributes."contact-phones" | Where-Object { $_.primary -eq $True }).value
+                    organizationId   = $unmatchedcontact.NinjaOneOrgID
+                    fullPortalAccess = $False
+                    
+                }
+                Write-Host "$($unmatchedcontact | ConvertTo-Json -Depth 100)"
+                
+                try {
+                    $NewNinjaOneContact = Invoke-NinjaOneRequest -Path "user/end-users" -Method POST -InputObject $ContactCreation -ea Stop
+
+                    $unmatchedcontact.matched = $true
+                    $unmatchedcontact.NinjaOneID = $NewNinjaOneContact.id
+                    $unmatchedcontact.NinjaOneObject = $NewNinjaOneContact
+                    $unmatchedcontact.Imported = "Created-By-Script"
+			
+                    Write-host "$($unmatchedcontact.Name) Has been created in NinjaOne"
+                    Write-Host ""
+
+                } catch {
+                    Write-Error "Failed to create contact: $($unmatchedcontact."organization-name") - $($unmatchedcontact.PrimaryEmail)"
+                    Write-Error "Email addresses must be unique across the NinjaOne platform. You can try adding a + address like test+example@test.com"
+                    Write-Error "$_"
+                    $unmatchedcontact.Imported = "Failed to create: $_"
+                }
+			
+                
+            }
+		
+        }
+		
+    } else {
+        if ($UnmappedContactsCount -eq 0) {
+            Write-Host "All Contacts matched, no migration required" -foregroundcolor green
+        } else {
+            Write-Host "Warning Import Contact is set to disabled so the above unmatched Contacts will not have data migrated" -foregroundcolor red
+            Write-TimedMessage -Message "Press any key to continue or CTRL+C to quit" -DefaultResponse "continue and wrap-up contacts, please." -Timeout 6
+        }
+    }
+    
     Write-Host "Contacts Complete"
 
     # Save the results to resume from if needed
     $MatchedContacts | ConvertTo-Json -depth 100 | Out-File "$MigrationLogs\Contacts.json"
-    Write-TimedMessage -Timeout 3 -Message "Snapshot Point: Contacts Migrated Continue?"  -DefaultResponse "continue to Flexible Asset Layouts, please."
+    Write-TimedMessage -Timeout 3 -Message "Snapshot Point: Contacts Migrated Continue?"  -DefaultResponse "continue to Users, please."
 
 }
 
+############################### Users ###############################
+#Check for Location Resume
+if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Users.json")) {
+    Write-Host "Loading Previous Users Migration"
+    $MatchedContacts = Get-Content "$MigrationLogs\Users.json" -raw | Out-String | ConvertFrom-Json -depth 100
+} else {
+
+    Write-Host "Fetching users from IT Glue" -ForegroundColor Green
+    $UsersSelect = { (Get-ITGlueUsers -page_size 1000 -page_number $i).data }
+    $ITGUsers = Import-ITGlueItems -ItemSelect $UsersSelect
+
+    $NinjaOneUsers = Invoke-NinjaOneRequest -Method GET -Path 'users'
+
+    $MatchedUsers = foreach ($itguser in $ITGUsers ) {
+
+        $NinjaOneUser = $NinjaOneUsers | Where-Object { $_.email -eq $itguser.attributes.email }
+
+        
+        if ($NinjaOneUser) {
+            [PSCustomObject]@{
+                "Name"           = $itguser.attributes.name
+                "ITGID"          = $itguser.id
+                "NinjaOneID"     = $NinjaOneUser.id
+                "Matched"        = $true
+                "NinjaOneObject" = $NinjaOneUser
+                "ITGObject"      = $itguser
+                "Imported"       = "Pre-Existing"
+                "PrimaryEmail"   = $itguser.attributes.email	
+            }
+        } else {
+            [PSCustomObject]@{
+                "Name"           = $itguser.attributes.name
+                "ITGID"          = $itguser.id
+                "NinjaOneID"     = ""
+                "Matched"        = $false
+                "NinjaOneObject" = ""
+                "ITGObject"      = $itguser
+                "Imported"       = ""
+                "PrimaryEmail"   = $itguser.attributes.email	
+            }
+        }
+    }
+
+    Write-Host "Matched Users"
+    $MatchedUsers | Sort-Object Name | Where-Object { $_.Matched -eq $true } | Select-Object Name, PrimaryEmail | Format-Table
+
+    Write-Host "Unmatched Users"
+    $UnmatchedUsers = $MatchedUsers | Sort-Object Name | Where-Object { $_.Matched -eq $false } | Select-Object Name, PrimaryEmail | Format-Table
+    $UnmatchedUsers
+
+    if (($UnmatchedUsers | Measure-Object).count -gt 0) {
+        Write-Error "Any unmatched Users will not be migrated. They should be manually created as technicians in NinjaOne if you wish them to set in relations"
+        Write-TimedMessage -Message "Press any key to continue or CTRL+C to quit" -DefaultResponse "continue and wrap-up contacts, please." -Timeout 6
+    }
+   
+
+    # Save the results to resume from if needed
+    $MatchedUsers | ConvertTo-Json -depth 100 | Out-File "$MigrationLogs\Users.json"
+    Write-TimedMessage -Timeout 3 -Message "Snapshot Point: Users Matched Continue?"  -DefaultResponse "continue to Flexible Asset Layouts, please."
+
+}
 	
 ############################### Flexible Asset Layouts and Assets ###############################
 #Check for Layouts Resume
@@ -992,17 +888,15 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\AssetLayouts.json")) 
     $AllFields = Get-Content "$MigrationLogs\AssetLayoutsFields.json" -raw | Out-String | ConvertFrom-Json -depth 100
 } else {
 
-    $ConfigImportAssetLayoutName = ($MatchedConfigurations.HuduObject | Select-Object name, asset_type | group-object -property asset_type | sort-object count -descending | Select-Object -first 1).name
-
     Write-Host "Fetching Flexible Asset Layouts from IT Glue" -ForegroundColor Green
     $FlexLayoutSelect = { (Get-ITGlueFlexibleAssetTypes -page_size 1000 -page_number $i -include related_items).data }
     $FlexLayouts = Import-ITGlueItems -ItemSelect $FlexLayoutSelect
 
-    $HuduLayouts = Get-HuduAssetLayouts
+    $NinjaOneLayouts = Invoke-NinjaOneRequest -Method GET -Path 'document-templates'
 
-    Write-Host "The script will now migrate IT Glue Flexible Asset Layouts to Hudu"
+    Write-Host "The script will now migrate IT Glue Flexible Asset Layouts to NinjaOne"
     Write-Host "Please select the option you would like"
-    Write-Host "1) Move all Flexible Asset Layouts to Hudu"
+    Write-Host "1) Move all Flexible Asset Layouts and their assets to NinjaOne"
     Write-Host "2) Determine on a layout by layout basis if you want to migrate"
     $ImportOption = Get-FlexLayoutImportMode
 
@@ -1010,99 +904,108 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\AssetLayouts.json")) 
 
     # Match to existing layouts
     $MatchedLayouts = foreach ($ITGLayout in $FlexLayouts) {
-        $HuduLayout = $HuduLayouts | where-object -filter { $_.name -eq "$($FlexibleLayoutPrefix)$($ITGLayout.attributes.name)" }
+        $NinjaOneLayout = $NinjaOneLayouts | where-object -filter { $_.name -eq "$($FlexibleLayoutPrefix)$($ITGLayout.attributes.name)" }
 		
-        if ($HuduLayout) {
+        if ($NinjaOneLayout) {
             [PSCustomObject]@{
-                "Name"       = $ITGLayout.attributes.name
-                "ITGID"      = $ITGLayout.id
-                "HuduID"     = $HuduLayout.id
-                "Matched"    = $true
-                "HuduObject" = $HuduLayout
-                "ITGObject"  = $ITGLayout
-                "ITGAssets"  = ""
-                "Imported"   = "Pre-Existing"
+                "Name"           = $ITGLayout.attributes.name
+                "ITGID"          = $ITGLayout.id
+                "NinjaOneID"     = $NinjaOneLayout.id
+                "Matched"        = $true
+                "NinjaOneObject" = $NinjaOneLayout
+                "ITGObject"      = $ITGLayout
+                "ITGAssets"      = ""
+                "Imported"       = "Pre-Existing"
+                "Import"         = $true
 			
             }
         } else {
             [PSCustomObject]@{
-                "Name"       = $ITGLayout.attributes.name
-                "ITGID"      = $ITGLayout.id
-                "HuduID"     = ""
-                "Matched"    = $false
-                "HuduObject" = ""
-                "ITGObject"  = $ITGLayout
-                "ITGAssets"  = ""
-                "Imported"   = ""
+                "Name"           = $ITGLayout.attributes.name
+                "ITGID"          = $ITGLayout.id
+                "NinjaOneID"     = ""
+                "Matched"        = $false
+                "NinjaOneObject" = ""
+                "ITGObject"      = $ITGLayout
+                "ITGAssets"      = ""
+                "Imported"       = ""
+                "Import"         = $true
             }
         }
     }
 
+    if ($ImportOption -eq 2) {
+        foreach ($Layout in $MatchedLayouts) {
+            $Import = ''
+            do {
+                $Import = Read-Host "Would you like to import $($Layout.name) and it's assets Y/N"
+                if ($Import -eq 'Y') {
+                    $Layout.Import = $true
+                } elseif ($Import -eq 'N') {
+                    $Layout.Import = $false
+                } else {
+                    Write-Error 'Please enter Y or N'
+                }
+            } while ($Import -notin @('Y', 'N') )
 
+        }
+    }
 
-    Write-Host "Matched Flexible Layouts (Already exist so will not be migrated)"
-    $MatchedLayouts | Sort-Object Name | Where-Object { $_.Matched -eq $true } | Select-Object Name | Format-Table
+    Write-Host "Existing Templates, Fields will be updated if required and assets migrated"
+    $MatchedLayouts | Sort-Object Name | Where-Object { $_.Matched -eq $true -and $_.Import -eq $True } | Select-Object Name | Format-Table
 
-    Write-Host "Unmatched Flexible Layouts"
-    $MatchedLayouts | Sort-Object Name | Where-Object { $_.Matched -eq $false } | Select-Object Name | Format-Table
+    Write-Host "Unmatched, will be created and assets migrated"
+    $MatchedLayouts | Sort-Object Name | Where-Object { $_.Matched -eq $false -and $_.Import -eq $True } | Select-Object Name | Format-Table
+
+    Read-Host 'Press any key to continue or Ctrl+C to cancel'
 
 
     if ($ImportFlexibleAssetLayouts -eq $true) {
 
-        foreach ($UnmatchedLayout in $MatchedLayouts | Where-Object { $_.Matched -eq $false }) {
-            if ($ImportOption -eq 2) {
-                Confirm-Import -ImportObjectName "$($ITGLayout.attributes.name)" -ImportObject $null -ImportSetting $ImportOption
+        foreach ($ImportLayout in $MatchedLayouts | Where-Object { $_.Matched -eq $false -and $_.import -eq $true }) {
+            
+            $Template = @{
+                name                      = "$($FlexibleLayoutPrefix)$($ImportLayout.ITGObject.attributes.name)"
+                description               = "$($FlexibleLayoutPrefix)$($ImportLayout.ITGObject.attributes.description)"
+                allowMultiple             = $true
+                mandatory                 = $false
+                availableToAllTechnicians = $true
+                fields                    = @(
+                    @{
+                        fieldLabel                = 'ITGlue Import Date'
+                        fieldName                 = 'itgImportDate'
+                        fieldDescription          = 'The date this asset was imported from IT Glue'
+                        fieldType                 = 'DATE'
+                        fieldTechnicianPermission = 'EDITABLE'
+                        fieldScriptPermission     = 'READ_ONLY'
+                        fieldApiPermission        = 'READ_WRITE'
+                        fieldContent              = @{
+                            required = $false
+                        }
+                    },
+                    @{
+                        fieldLabel                = 'ITGlue URL'
+                        fieldName                 = 'itgUrl'
+                        fieldDescription          = 'The URL to the original item in ITGlue'
+                        fieldType                 = 'URL'
+                        fieldTechnicianPermission = 'EDITABLE'
+                        fieldScriptPermission     = 'READ_ONLY'
+                        fieldApiPermission        = 'READ_WRITE'
+                        fieldContent              = @{
+                            required = $false
+                        }
+                    }
+                )
             }
-
-            $TempLayoutFields = @(
-                @{
-                    label        = 'Imported from ITGlue'
-                    field_type   = 'Date'
-                    show_in_list = 'false'
-                    position     = 500
-                },
-                @{
-                    label        = 'ITGlue URL'
-                    field_type   = 'Text'
-                    show_in_list = 'false'
-                    position     = 501
-                },
-                @{
-                    label        = 'ITGlue ID'
-                    field_type   = 'Text'
-                    show_in_list = 'false'
-                    position     = 502
-                }
-
-            )
-            if ($null -eq $UnmatchedLayout.ITGObject.attributes.icon) {
-                $NewIcon = 'circle'
-
-            } elseif ($($FontAwesomeUpgrade."$($UnmatchedLayout.ITGObject.attributes.icon)")) {
-                $NewIcon = $($FontAwesomeUpgrade."$($UnmatchedLayout.ITGObject.attributes.icon)")
-            } else {
-                $CurrentIcon = ($UnmatchedLayout.ITGObject.attributes.icon -replace "-o-", "-")
-                $LastTwo = $CurrentIcon.Substring($CurrentIcon.get_Length() - 2)
-                if ($LastTwo -eq "-o") {
-                    #strip last 2 digits
-                    $CurrentIcon = $CurrentIcon.Substring(0, $CurrentIcon.get_Length() - 2)
-                }
-                $NewIcon = $CurrentIcon
-            }
-		
-		
-            $NewLayout = New-HuduAssetLayout -name "$($FlexibleLayoutPrefix)$($UnmatchedLayout.ITGObject.attributes.name)" -icon "fas fa-$NewIcon" -color "00adef" -icon_color "#ffffff" -include_passwords $true -include_photos $true -include_comments $true -include_files $true -fields $TempLayoutFields 
-            $MatchedNewLayout = Get-HuduAssetLayouts -layoutid $NewLayout.asset_layout.id
-            $UnmatchedLayout.HuduObject = $MatchedNewLayout
-            $UnmatchedLayout.HuduID = $NewLayout.asset_layout.id
-            $UnmatchedLayout.Imported = "Created-By-Script"
-
-
+            
+            $NewTemplate = Invoke-NinjaOneDocumentTemplate -Template $Template
+            $ImportLayout.NinjaOneObject = $NewTemplate
+            $ImportLayout.NinjaOneID = $NewTemplate.id
+            $ImportLayout.Imported = "Created-By-Script"
 
         }
 
-
-        foreach ($UpdateLayout in $MatchedLayouts) {
+        foreach ($UpdateLayout in $MatchedLayouts | Where-Object { $_.Import -eq $true }) {
             Write-Host "Starting $($UpdateLayout.Name)" -ForegroundColor Green
 
             # Grab the fields for the layout
@@ -1116,131 +1019,219 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\AssetLayouts.json")) 
             $FlexAssetsSelect = { (Get-ITGlueFlexibleAssets -page_size 1000 -page_number $i -filter_flexible_asset_type_id $UpdateLayout.ITGID -include related_items).data }
             $FlexAssets = Import-ITGlueItems -ItemSelect $FlexAssetsSelect
 		
+            
 				
+            [System.Collections.Generic.List[PSCustomObject]]$UpdateTemplateFields = @()
+            foreach ($ITGField in $FlexLayoutFields | Sort-Object $_.attributes.order) {
+                if ($ITGField.Attributes.kind -eq 'Header') {
+                    $TemplateField = @{
+                        uiElementUid   = (New-Guid).Guid
+                        uiElementName  = $ITGField.Attributes.name
+                        uiElementType  = 'TITLE'
+                        uiElementValue = $ITGField.Attributes.name
+                    }
+                } else {
+
+                    $supported = $true
 		
-            $UpdateLayoutFields = foreach ($ITGField in $FlexLayoutFields) {
-                $LayoutField = @{
-                    label        = $ITGField.Attributes.name
-                    show_in_list = $ITGField.Attributes."show-in-list"
-                    position     = $ITGField.Attributes.order
-                    required     = $ITGField.Attributes.required
-                    hint         = $ITGField.Attributes.hint
-                }
-
-                $supported = $true
-		
-
-                switch ($ITGField.Attributes.kind) {
-                    "Checkbox" {
-                        $LayoutField.add("field_type", "CheckBox")
-                    }
-                    "Date" {
-                        $LayoutField.add("field_type", "Date")
-                        $LayoutField.add("expiration", $($ITGField.Attributes.expiration))
-                    }
-                    "Header" {
-                        $LayoutField.add("field_type", "Heading")
-                    }
-                    "Number" {
-                        $LayoutField.add("field_type", "Number")
-                    }
-                    "Select" {
-                        $LayoutField.add("field_type", "Dropdown")
-                        $LayoutField.add("options", $($ITGField.Attributes."default-value"))
-                    }
-                    "Text" {
-                        $LayoutField.add("field_type", "Text")
-                    }
-                    "Textbox" {
-                        $LayoutField.add("field_type", "RichText")
-                    }
-                    "Upload" {
-                        Write-Host "Upload fields are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) this will be added when the Hudu API supports it, Sorry!"
-                        $supported = $false
-                    }
-                    "Tag" {
-                        switch (($ITGField.Attributes."tag-type").split(":")[0]) {
-                            "AccountsUsers" { Write-Host "Tags to Account Users are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!" ; $supported = $false }
-                            "Checklists" { Write-Host "Tags to Checklists are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!"; $supported = $false }
-                            "ChecklistTemplates" { Write-Host "Tags to Checklists Templates are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!"; $supported = $false }
-                            "Contacts" {
-                                $ContactLayout = Get-HuduAssetLayouts -name $ConImportAssetLayoutName
-                                $LayoutField.add("field_type", "AssetTag")
-                                $LayoutField.add("linkable_id", $ContactLayout.ID)
+                    switch ($ITGField.Attributes.kind) {
+                        "Checkbox" {
+                            $NinjaOneFieldType = 'CHECKBOX'
+                            $NinjaOneFieldContent = @{
+                                required    = $ITGField.Attributes.required
+                                tooltipText = $ITGField.Attributes.hint ?? ''
                             }
-                            "Configurations" {
-                                $ConfigLayout = Get-HuduAssetLayouts -name $ConfigImportAssetLayoutName
-                                $LayoutField.add("field_type", "AssetTag")
-                                $LayoutField.add("linkable_id", $ConfigLayout.ID)
+                        }
+                        "Date" {
+                            $NinjaOneFieldType = 'DATE'
+                            $NinjaOneFieldContent = @{
+                                required    = $ITGField.Attributes.required
+                                tooltipText = $ITGField.Attributes.hint ?? ''
                             }
-                            "Documents" { Write-Host "Tags to Documents are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!"; $supported = $false } 
-                            "Domains" { Write-Host "Tags to Websites are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!"; $supported = $false }
-                            "Passwords" { Write-Host "Tags to Passwords are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!"; $supported = $false }
-                            "Locations" {
-                                $LocationLayout = Get-HuduAssetLayouts -name $LocImportAssetLayoutName
-                                $LayoutField.add("field_type", "AssetTag")
-                                $LayoutField.add("linkable_id", $LocationLayout.ID)
+                        }
+                        "Number" {
+                            if ($ITGField.Attributes.decimals -gt 0) {
+                                $NinjaOneFieldType = 'DECIMAL'
+                            } else {
+                                $NinjaOneFieldType = 'NUMERIC'
                             }
-                            "Organizations" { Write-Host "Tags to Companies are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!"; $supported = $false }
-                            "SslCertificates" { Write-Host "Tags to SSL Certificates are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!"; $supported = $false }
-                            "Tickets" { Write-Host "Tags to Tickets are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!"; $supported = $false }
-                            "FlexibleAssetType" {	
-                                $MatchedLayoutID = ($MatchedLayouts | where-object -filter { $_.ITGID -eq ($ITGField.Attributes."tag-type").split(" ")[1] }).HuduID
-                                $LayoutField.add("field_type", "AssetTag")
-                                $LayoutField.add("linkable_id", $MatchedLayoutID)
+                            $NinjaOneFieldContent = @{
+                                required    = $ITGField.Attributes.required
+                                tooltipText = $ITGField.Attributes.hint ?? ''
                             }
-									
-
+                        }
+                        "Select" {
+                            $NinjaOneFieldType = 'DROPDOWN'
+                            $NinjaOneValues = (($ITGField.Attributes."default-value") -split "`n" | ForEach-Object {
+                                    @{name = $_ }
+                                }) ?? @()
+                            $NinjaOneFieldContent = @{
+                                values      = $NinjaOneValues
+                                required    = $ITGField.Attributes.required
+                                tooltipText = $ITGField.Attributes.hint ?? ''
+                            }
+                        }
+                        "Text" {
+                            $NinjaOneFieldType = 'TEXT'
+                            $NinjaOneFieldContent = @{
+                                required    = $ITGField.Attributes.required
+                                tooltipText = $ITGField.Attributes.hint ?? ''
+                            }
+                        }
+                        "Textbox" {
+                            $NinjaOneFieldType = 'WYSIWYG'
+                            $NinjaOneFieldContent = @{
+                                required         = $ITGField.Attributes.required
+                                tooltipText      = $ITGField.Attributes.hint ?? ''
+                                advancedSettings = @{
+                                    expandLargeValueOnRender = $true
+                                }
+                            }
+                        }
+                        "Upload" {
+                            $NinjaOneFieldType = 'ATTACHMENT'
+                            $NinjaOneFieldContent = @{
+                                required    = $ITGField.Attributes.required
+                                tooltipText = $ITGField.Attributes.hint ?? ''
+                            }
+                        }
+                        "Tag" {
+                            switch (($ITGField.Attributes."tag-type").split(":")[0]) {
+                                "AccountsUsers" { Write-Host "Tags to Account Users are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!" ; $supported = $false }
+                                "Checklists" { Write-Host "Tags to Checklists are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!"; $supported = $false }
+                                "ChecklistTemplates" { Write-Host "Tags to Checklists Templates are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!"; $supported = $false }
+                                "Contacts" { Write-Host "Tags to Contacts are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!"; $supported = $false }
+                                "Configurations" {
+                                    $NinjaOneFieldType = 'NODE_MULTI_SELECT'
+                                    $NinjaOneFieldContent = @{
+                                        required    = $ITGField.Attributes.required
+                                        tooltipText = $ITGField.Attributes.hint ?? ''
+                                    }
+                                }
+                                "Documents" { Write-Host "Tags to Documents are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!"; $supported = $false } 
+                                "Domains" { Write-Host "Tags to Websites are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!"; $supported = $false }
+                                "Passwords" { Write-Host "Tags to Passwords are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!"; $supported = $false }
+                                "Locations" {
+                                    $NinjaOneFieldType = 'CLIENT_LOCATION_MULTI_SELECT'
+                                    $NinjaOneFieldContent = @{
+                                        required    = $ITGField.Attributes.required
+                                        tooltipText = $ITGField.Attributes.hint ?? ''
+                                    }
+                                }
+                                "Organizations" { 
+                                    $NinjaOneFieldType = 'CLIENT_MULTI_SELECT'
+                                    $NinjaOneFieldContent = @{
+                                        required    = $ITGField.Attributes.required
+                                        tooltipText = $ITGField.Attributes.hint ?? ''
+                                    }
+                                }
+                                "SslCertificates" { Write-Host "Tags to SSL Certificates are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!"; $supported = $false }
+                                "Tickets" { Write-Host "Tags to Tickets are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!"; $supported = $false }
+                                "FlexibleAssetType" { Write-Host "Tags to Assets are not supported $($ITGField.Attributes.name) in $($UpdateLayout.name) will need to be manually migrated, Sorry!"; $supported = $false }
+                            }
+                        }
+                        "Percent" {
+                            $NinjaOneFieldType = 'NUMERIC'
+                            $NinjaOneFieldContent = @{
+                                required    = $ITGField.Attributes.required
+                                tooltipText = $ITGField.Attributes.hint ?? ''
+                            }
+                        }
+                        "Password" {
+                            $NinjaOneFieldType = 'TEXT_ENCRYPTED'
+                            $NinjaOneFieldContent = @{
+                                required         = $ITGField.Attributes.required
+                                tooltipText      = $ITGField.Attributes.hint ?? ''
+                                advancedSettings = @{
+                                    maxCharacters = 20000
+                                }
+                                
+                            }
                         }
                     }
-                    "Percent" {
-                        $LayoutField.add("field_type", "Number")
+
+                    $TemplateField = @{
+                        fieldLabel                = $ITGField.Attributes.name
+                        fieldName                 = (ConvertTo-CamelCase -InputString $ITGField.Attributes.name)
+                        fieldType                 = $NinjaOneFieldType
+                        fieldTechnicianPermission = 'EDITABLE'
+                        fieldScriptPermission     = 'READ_ONLY'
+                        fieldApiPermission        = 'READ_WRITE'
+                        fieldDefaultValue         = $ITGField.Attributes.'default-value' ?? ""
+                        fieldContent              = $NinjaOneFieldContent
                     }
-                    "Password" {
-                        $LayoutField.add("field_type", "Password")
-                    }
+
                 }
 
-
-                #Populate Global Field List
                 if ($ITGField.Attributes.kind -eq "Tag") {
                     $SubKind = ($ITGField.Attributes."tag-type").split(":")[0]
                 } else {
                     $SubKind = ""
-                }
+                }  
 
                 $FieldDetails = [PSCustomObject]@{
-                    LayoutName      = $UpdateLayout.Name
-                    FieldName       = $ITGField.Attributes.name
-                    FieldType       = $ITGField.Attributes.kind
-                    FieldSubType    = $SubKind
-                    HuduLayoutID    = $UpdateLayout.HuduID
-                    IGLayoutID      = $UpdateLayout.ITGID
-                    ITGParsedName   = $ITGField.Attributes."name-key"
-                    HuduParsedName  = ($ITGField.Attributes.name -replace " ", "_").ToLower()
-                    Supported       = $supported
-                    HuduLayoutField = $LayoutField
+                    LayoutName         = $UpdateLayout.Name
+                    FieldName          = $ITGField.Attributes.name
+                    FieldType          = $ITGField.Attributes.kind
+                    FieldSubType       = $SubKind
+                    NinjaOneLayoutID   = $UpdateLayout.NinjaOneID
+                    IGLayoutID         = $UpdateLayout.ITGID
+                    ITGParsedName      = $ITGField.Attributes."name-key"
+                    NinjaOneParsedName = (ConvertTo-CamelCase -InputString $ITGField.Attributes.name)
+                    Supported          = $supported
+                    NinjaOneField      = $TemplateField
                 }
                 $null = $AllFields.add($FieldDetails)
 
 
                 if ($supported -eq $true) {
-                    $LayoutField
+                    $UpdateTemplateFields.add($TemplateField)
                 }
 
             }
 
-            $null = Set-HuduAssetLayout -id $UpdateLayout.HuduID  -name $UpdateLayout.HuduObject.Name -icon $UpdateLayout.HuduObject.icon -color $UpdateLayout.HuduObject.color -icon_color $UpdateLayout.HuduObject.icon_color -include_passwords $true -include_photos $true -include_comments $true -include_files $true -fields @($UpdateLayoutFields)
-            $UpdatedLayout = Get-HuduAssetLayouts -layoutid $UpdateLayout.HuduID
-            Write-Host "Finished $($UpdateLayout.HuduObject.Name)"
-            $UpdateLayout.HuduObject = $UpdatedLayout
+            $UpdateTemplateFields.add(@{
+                    fieldLabel                = 'ITGlue Import Date'
+                    fieldName                 = 'itgImportDate'
+                    fieldDescription          = 'The date this asset was imported from IT Glue'
+                    fieldType                 = 'DATE'
+                    fieldTechnicianPermission = 'EDITABLE'
+                    fieldScriptPermission     = 'READ_ONLY'
+                    fieldApiPermission        = 'READ_WRITE'
+                    fieldContent              = @{
+                        required = $false
+                    }
+                })
+
+            $UpdateTemplateFields.add(@{
+                    fieldLabel                = 'ITGlue URL'
+                    fieldName                 = 'itgUrl'
+                    fieldDescription          = 'The URL to the original item in ITGlue'
+                    fieldType                 = 'URL'
+                    fieldTechnicianPermission = 'EDITABLE'
+                    fieldScriptPermission     = 'READ_ONLY'
+                    fieldApiPermission        = 'READ_WRITE'
+                    fieldContent              = @{
+                        required = $false
+                    }
+                })
+
+
+            $UpdateTemplate = @{
+                name          = $UpdateLayout.NinjaOneObject.Name
+                description   = $UpdateLayout.ITGObject.attributes.description
+                allowMultiple = $true
+                mandatory     = $false
+                fields        = $UpdateTemplateFields
+            }
+
+            $UpdatedLayout = Invoke-NinjaOneDocumentTemplate -Template $UpdateTemplate
+            Write-Host "Finished $($UpdateLayout.NinjaOneObject.Name)"
+            $UpdateLayout.NinjaOneObject = $UpdatedLayout
             $UpdateLayout.ITGAssets = $FlexAssets
             $UpdateLayout.Matched = $true
 
         }
-
-
-
 
     }
 
@@ -1251,6 +1242,8 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\AssetLayouts.json")) 
 
 }
 
+
+
 ############################### Flexible Assets ###############################
 #Check for Assets Resume
 if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Assets.json")) {
@@ -1260,12 +1253,16 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Assets.json")) {
     $RelationsToCreate = [System.Collections.ArrayList](Get-Content "$MigrationLogs\RelationsToCreate.json" -raw | Out-String | ConvertFrom-Json -depth 100)
     $ManualActions = [System.Collections.ArrayList](Get-Content "$MigrationLogs\ManualActions.json" -raw | Out-String | ConvertFrom-Json -depth 100)
 } else {
+
+    
+
     # Load raw passwords for embedded fields and future use
     $ITGPasswordsRaw = Import-CSV -Path "$ITGLueExportPath\passwords.csv"
     if ($ImportFlexibleAssets -eq $true) {
-        $RelationsToCreate = [System.Collections.ArrayList]@()
-        $MatchedAssets = [System.Collections.ArrayList]@()
-        $MatchedAssetPasswords = [System.Collections.ArrayList]@()
+        [System.Collections.Generic.List[PSCustomObject]]$RelationsToCreate = @()
+        [System.Collections.Generic.List[PSCustomObject]]$MatchedAssets = @()
+        [System.Collections.Generic.List[PSCustomObject]]$MatchedAssetPasswords = @()
+        
 
         #We need to do a first pass creating empty assets with just the ITG migrated data. This builds an array we need to use to lookup relations when populating the entire assets
         if ($ScopedMigration) {
@@ -1276,35 +1273,75 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Assets.json")) {
         }
 
         Foreach ($Layout in $MatchedLayouts) {
-            Write-Host "Creating base assets for $($layout.name)"
+            [System.Collections.Generic.List[PSCustomObject]]$DocumentsToCreate = @()
+            $CurrentDocuments = Invoke-NinjaOneRequest -Method GET -Path 'organization/documents' -QueryParams "templateIds=$($Layout.NinjaOneObject.id)"
+
+            Write-Host "Creating base assets for $($layout.name)" -ForegroundColor "Green"
             foreach ($ITGAsset in $Layout.ITGAssets) {
                 # Match Company
-                $HuduCompanyID = ($MatchedCompanies | where-object -filter { $_.ITGID -eq $ITGAsset.attributes.'organization-id' }).HuduID
+                $NinjaCompanyID = ($MatchedCompanies | where-object -filter { $_.ITGID -eq $ITGAsset.attributes.'organization-id' }).NinjaOneID
+                $MatchedDocument = $CurrentDocuments | Where-object { $_.documentName -eq $ITGAsset.attributes.name -and $_.organizationId -eq $NinjaCompanyID }
 
-                $AssetFields = @{ 
-                    'imported_from_itglue' = Get-Date -Format "o"
-                    'itglue_url'           = $ITGAsset.attributes.'resource-url'
-                    'itglue_id'            = $ITGAsset.id
+                if (($MatchedDocument | Measure-Object).count -eq 0) {
+                    $DocCreation = @{ 
+                        documentName       = $ITGAsset.attributes.name
+                        documentTemplateId = $Layout.NinjaOneObject.id
+                        organizationId     = $NinjaCompanyID
+                        fields             = @{
+                            'itgImportDate' = Get-NinjaOneTime -Date $(Get-Date)
+                            'itgUrl'        = $ITGAsset.attributes.'resource-url'
+                        }
+                    }
+
+                    $DocumentsToCreate.Add($DocCreation)
+                } else {
+                    Write-Host "Document already found, skipping $($ITGAsset.attributes.name)"
                 }
-			
-                $NewHuduAsset = (New-HuduAsset -name $ITGAsset.attributes.name -company_id $HuduCompanyID -asset_layout_id $Layout.HuduObject.id -fields $AssetFields).asset
+            }
+            
 
-                $AssetDetails = [PSCustomObject]@{
-                    "Name"       = $ITGAsset.attributes.name
-                    "ITGID"      = $ITGAsset.id
-                    "HuduID"     = $NewHuduAsset.Id
-                    "Matched"    = $false
-                    "HuduObject" = $NewHuduAsset
-                    "ITGObject"  = $ITGAsset
-                    "Imported"   = "First Pass"
+            for ($i = 0; $i -lt $DocumentsToCreate.Count; $i += 100) {
+                $start = $i
+                $end = [Math]::Min($i + 99, $DocumentsToCreate.Count - 1)
+                $batch = @($DocumentsToCreate[$start..$end])
+                try {
+                    $null = Invoke-NinjaOneRequest -InputObject $Batch -Method POST -Path 'organization/documents' -AsArray -es Stop
+                } catch {
+                    Write-Error "One or more items in the batch request failed $_"
                 }
+            }
+        
 
-                $null = $MatchedAssets.add($AssetDetails)
+            $CurrentDocuments = Invoke-NinjaOneRequest -Method GET -Path 'organization/documents' -QueryParams "templateIds=$($Layout.NinjaOneObject.id)"
 
+            foreach ($ITGAsset in $Layout.ITGAssets) {
+                $NinjaCompanyID = ($MatchedCompanies | where-object -filter { $_.ITGID -eq $ITGAsset.attributes.'organization-id' }).NinjaOneID                
+                $MatchedDocument = $CurrentDocuments | Where-object { $_.fields.value -contains $ITGAsset.attributes.'resource-url' }
+                if (($MatchedDocument | Measure-Object).count -eq 1) {
+                    $AssetDetails = [PSCustomObject]@{
+                        "Name"           = $ITGAsset.attributes.name
+                        "ITGID"          = $ITGAsset.id
+                        "NinjaOneID"     = $MatchedDocument.Id
+                        "Matched"        = $false
+                        "NinjaOneObject" = $MatchedDocument
+                        "ITGObject"      = $ITGAsset
+                        "Imported"       = "First Pass"
+                    }
+
+                    $null = $MatchedAssets.add($AssetDetails)
+                } else {
+                    Write-Error "Failed to match $($ITGAsset.attributes.name) in $($ITGAsset.attributes.'organization-name'), creation may have failed due to duplicate name or other issue."
+                }
+                    
             }
 		
         }
-	
+
+        Read-Host "Pause"
+        Write-Host "$($MatchedAssets | ConvertTo-Json -Depth 100)"
+        Read-Host "Pause"
+        
+        # TEMP Import Assets Next
 	
         #We now need to loop through all Assets again updating the assets to their final version
         foreach ($UpdateAsset in $MatchedAssets) {
@@ -2336,7 +2373,7 @@ $FinalHtml | Out-File ManualActions.html
 
 Write-Host "#######################################################" -ForegroundColor Green
 Write-Host "#                                                     #" -ForegroundColor Green
-Write-Host "#        IT Glue to Hudu Migration Complete           #" -ForegroundColor Green
+Write-Host "#        IT Glue to NinjaOne Migration Complete           #" -ForegroundColor Green
 Write-Host "#                                                     #" -ForegroundColor Green
 Write-Host "#######################################################" -ForegroundColor Green
 Write-Host "Started At: $ScriptStartTime"

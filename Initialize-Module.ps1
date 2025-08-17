@@ -23,7 +23,7 @@
 
 
 param(
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory = $true)]
     [ValidateSet("Full", "Lite")]
     [string] $InitType
 )
@@ -32,7 +32,7 @@ param(
 # Define the path to the settings.json file in the user's AppData folder
 
 # Determine top part of settings path
-if($IsWindows){
+if ($IsWindows) {
     $settingsTop = $env:APPDATA
 } else {
     $settingsTop = Join-Path "$home" ".config"
@@ -41,14 +41,14 @@ if($IsWindows){
 # Define the path to the settings.json file in the detected platform's folder:
 # Running on Windows will save to the user's AppData
 # Running on Linux/macOS will save to `.config` in the user's HOME directory
-  # Something awesome will be here soon.
-$settingsFiles = $settingsFiles ?? $(try {Get-Item "$settingsTop\NinjaOneMigration\*\settings.json" -ea stop} catch {$null})
+# Something awesome will be here soon.
+$settingsFiles = $settingsFiles ?? $(try { Get-Item "$settingsTop\NinjaOneMigration\*\settings.json" -ea stop } catch { $null })
 $defaultSettingsPath = $defaultSettingsPath ?? "$settingsTop\NinjaOneMigration\settings.json"
 
 # Function to read back securely stored keys used in the settings.json file
 function ConvertSecureStringToPlainText {
     param (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [System.Security.SecureString] $SecureString
     )
 
@@ -57,9 +57,9 @@ function ConvertSecureStringToPlainText {
     [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
     return $plainText
 }
-function Select-ObjectFromList($objects,$message,$allowNull = $false) {
-    $validated=$false
-    while ($validated -eq $false){
+function Select-ObjectFromList($objects, $message, $allowNull = $false) {
+    $validated = $false
+    while ($validated -eq $false) {
 
         for ($i = 0; $i -lt $objects.Count; $i++) {
             $object = $objects[$i]
@@ -76,16 +76,27 @@ function Select-ObjectFromList($objects,$message,$allowNull = $false) {
         }        
         Write-Host $message
         $choice = Read-Host
-        if ($null -eq $choice -or $choice -lt 0 -or $choice -gt $objects.Count +1) {
+        if ($null -eq $choice -or $choice -lt 0 -or $choice -gt $objects.Count + 1) {
             Write-Host -message "Invalid selection. Please enter a number from above"
         }
         if ($choice -eq 0 -and $true -eq $allowNull) {
             return $null
         }
-        if ($null -ne $objects[$choice - 1]){
+        if ($null -ne $objects[$choice - 1]) {
             return $objects[$choice - 1]
         }
     }
+}
+
+function ConvertTo-CamelCase {
+    param (
+        [string]$InputString
+    )
+
+    $First, $Rest = $InputString -Replace '[^0-9A-Z]', ' ' -Split ' ', 2
+    $camelCase = $First.Tolower() + (Get-Culture).TextInfo.ToTitleCase($Rest) -Replace ' '
+
+    return $camelCase
 }
 
 # Prompt the user for various settings and save the responses
@@ -96,16 +107,16 @@ function CollectAndSaveSettings {
     # 1. Unser Entry- Urls
     Write-Host "Settings- URLs:" -ForegroundColor Yellow
     $settings.NinjaOneBaseDomain = $settings.NinjaOneBaseDomain ?? 
-        $((Read-Host -Prompt 'Set the base domain of your NinjaOne instance (e.g eu.ninjaone.com, app.ninjaone.com, mydomain.rmmservices.com)'))
+    $((Read-Host -Prompt 'Set the base domain of your NinjaOne instance (e.g eu.ninjaone.com, app.ninjaone.com, mydomain.rmmservices.com)'))
     $settings.ITGURL = $settings.ITGURL ?? 
-        $((Read-Host -Prompt 'Set the domain of your ITGlue instance (e.g https://your-company.itglue.com)') -replace '[\\/]+$', '') -replace '^(?!https://)', 'https://'
+    $((Read-Host -Prompt 'Set the domain of your ITGlue instance (e.g https://your-company.itglue.com)') -replace '[\\/]+$', '') -replace '^(?!https://)', 'https://'
     $settings.ITGAPIEndpoint = $settings.ITGAPIEndpoint ?? 
-        $(Select-ObjectFromList -objects @("https://api.itglue.com", "https://api.eu.itglue.com", "https://api.au.itglue.com") -message "Select ITGlue API Endpoint for your instance/region")
+    $(Select-ObjectFromList -objects @("https://api.itglue.com", "https://api.eu.itglue.com", "https://api.au.itglue.com") -message "Select ITGlue API Endpoint for your instance/region")
     $customBrandedDomain = $customBrandedDomain ?? 
-        $(Read-Host -Prompt "Do you have additional hostnames you'd like to include in the URL Replacement? For example custom branded ITGlue Domain Name. (y/n)").ToLower().Trim()
-    $instance = $settings.ITGURL.replace('https://','')
+    $(Read-Host -Prompt "Do you have additional hostnames you'd like to include in the URL Replacement? For example custom branded ITGlue Domain Name. (y/n)").ToLower().Trim()
+    $instance = $settings.ITGURL.replace('https://', '')
     if ($customBrandedDomain.ToLower() -eq 'y') {
-    	$settings.ITGCustomDomains = Read-Host -Prompt "Please enter comma separated list of URLs to check for, following the same format of the main domain URL. If only one, don't include the comma."
+        $settings.ITGCustomDomains = Read-Host -Prompt "Please enter comma separated list of URLs to check for, following the same format of the main domain URL. If only one, don't include the comma."
     }
 
     # 2. User-Entry- Secrets
@@ -130,28 +141,28 @@ function CollectAndSaveSettings {
     # 3. User-Entry Global KB Settings
     Write-Host "Settings- Global KnowledgeBase:" -ForegroundColor Yellow
     $settings.InternalCompany = $settings.InternalCompany ??
-        $(Read-Host 'Enter the exact name of the ITGlue Organization that represents your Internal Company ').ToString().Trim()
+    $(Read-Host 'Enter the exact name of the ITGlue Organization that represents your Internal Company ').ToString().Trim()
     $settings.GlobalKBFolder = $settings.GlobalKBFolder ??
-        ""
-    while ($settings.GlobalKBFolder.Length -ne 1 -or $settings.GlobalKBFolder.ToLower() -notin @('y','n')) {
+    ""
+    while ($settings.GlobalKBFolder.Length -ne 1 -or $settings.GlobalKBFolder.ToLower() -notin @('y', 'n')) {
         $settings.GlobalKBFolder = $(Read-Host -Prompt 'Do you want all documents in Global KB to be placed into a subfolder? (y/n)').ToString().Trim().ToLower()
-        if ($settings.GlobalKBFolder -notin @("y","n")){
+        if ($settings.GlobalKBFolder -notin @("y", "n")) {
             Write-Host "Please re-enter, y or n"
         }
     }
     Write-Host "The documents from the company $($settings.InternalCompany) will be migrated to NinjaOneIT's Global KB section " -ForegroundColor Cyan
     $settings.ConPromptPrefix = $settings.ConPromptPrefix ?? 
-        $(Read-Host "Would you like a Prefix in front of ️Configuration names️ created in NinjaOne? This can make it easy to review and you can rename them later. Enter the prefix here, otherwise leave it blank. (e.g. ITGlue-)")
+    $(Read-Host "Would you like a Prefix in front of ️Configuration names️ created in NinjaOne? This can make it easy to review and you can rename them later. Enter the prefix here, otherwise leave it blank. (e.g. ITGlue-)")
     $settings.FAPromptPrefix = $settings.FAPromptPrefix ??
-        $(Read-Host "Would you like a Prefix in front of Apps and Services names created in NinjaOne? This can make it easy to review and you can rename them later. Enter the prefix here, otherwise leave it blank. (e.g. ITGlue-)")
+    $(Read-Host "Would you like a Prefix in front of Apps and Services names created in NinjaOne? This can make it easy to review and you can rename them later. Enter the prefix here, otherwise leave it blank. (e.g. ITGlue-)")
 
     
     # 4. User-Entry Paths and Folders
     Write-Host "️Settings- Paths and Folders:" -ForegroundColor Yellow
     $settings.ITGLueExportPath = $settings.ITGLueExportPath ?? 
-        $(Read-Host 'Enter the path of the ITGLue Export. (e.g. C:\Temp\ITGlue\Export) ️')
+    $(Read-Host 'Enter the path of the ITGLue Export. (e.g. C:\Temp\ITGlue\Export) ️')
     $settings.MigrationLogs = $settings.MigrationLogs ??
-        $(Read-Host "Enter the path for the migration logs, or press enter to accept the Default path ($settingsTop\NinjaOneMigration\$instance\MigrationLogs)")
+    $(Read-Host "Enter the path for the migration logs, or press enter to accept the Default path ($settingsTop\NinjaOneMigration\$instance\MigrationLogs)")
     # Fallback for Migrationlogs setting
     if (!($settings.MigrationLogs)) {
         $settings.MigrationLogs = "$settingsTop\NinjaOneMigration\$instance\MigrationLogs"
@@ -162,7 +173,7 @@ function CollectAndSaveSettings {
 
     # Verify settings, save or exit and retry
     $reenterChoice = $reenterChoice ?? 
-        $(Select-ObjectFromList -message "Do these settings look alright? $(($settings | ConvertTo-Json -depth 4).ToString())\n-If you choose to re-enter, changes made will not be saved" -objects @("Continue", "Re-Enter"))
+    $(Select-ObjectFromList -message "Do these settings look alright? $(($settings | ConvertTo-Json -depth 4).ToString())\n-If you choose to re-enter, changes made will not be saved" -objects @("Continue", "Re-Enter"))
     if ($reenterChoice -eq "Continue") {
         Write-Host "Saving Settings to $defaultSettingsPath"
         # Convert the hash table to JSON
@@ -185,22 +196,19 @@ function UpdateSavedSettings {
             Write-Host "️Overwriting existing settings file with updated settings." -ForegroundColor Cyan
             $json = $newSettings | ConvertTo-Json
             $json | Out-File -FilePath $settingsPath
-        }
-        else {
+        } else {
             Write-Host "Creating new settings file in $settingsPath" -ForegroundColor Yellow
             $json = $newSettings | ConvertTo-Json
             $json | Out-File -FilePath $settingsPath
         }
-    }
-    else {
+    } else {
         
         if (Test-Path $defaultSettingsPath) {
             # Convert the hash table to JSON
             Write-Host "️Overwriting existing settings file with updated settings." -ForegroundColor Cyan
             $json = $newSettings | ConvertTo-Json
             $json | Out-File -FilePath $defaultSettingsPath
-        }
-        else {
+        } else {
             Write-Host "Creating new settings file in $defaultSettingsPath" -ForegroundColor Yellow
             $json = $newSettings | ConvertTo-Json
             $json | Out-File -FilePath $defaultSettingsPath
@@ -240,8 +248,7 @@ function PromptForSettingsPath {
 # Ask the user what they want to do
 if ($environmentSettings -and $InitType -eq 'Lite') {
     Write-Host "Lite init and settings detected."
- }
- else {
+} else {
     $choice = $choice ?? $(Read-Host -Prompt "Do you want to `n(I)mport `n settings or start from `n(N)ew ?")
 
     switch ($choice) {
@@ -281,140 +288,14 @@ if ($environmentSettings -and $InitType -eq 'Lite') {
     }
 }
 
-function Get-NinjaOneToken {
-    [CmdletBinding()]
-    param()
-
-    if ($Script:NinjaOneInstance -and $Script:NinjaOneClientID -and $Script:NinjaOneClientSecret ) {
-        if ($Script:NinjaTokenExpiry -and (Get-Date) -lt $Script:NinjaTokenExpiry) {
-            return $Script:NinjaToken
-        } else {
-
-            if ($Script:NinjaOneRefreshToken) {
-                $Body = @{
-                    'grant_type'    = 'refresh_token'
-                    'client_id'     = $Script:NinjaOneClientID
-                    'client_secret' = $Script:NinjaOneClientSecret
-                    'refresh_token' = $Script:NinjaOneRefreshToken
-                }
-            } else {
-
-                $body = @{
-                    grant_type    = 'client_credentials'
-                    client_id     = $Script:NinjaOneClientID
-                    client_secret = $Script:NinjaOneClientSecret
-                    scope         = 'monitoring management'
-                }
-            }
-
-            $token = Invoke-RestMethod -Uri "https://$($Script:NinjaOneInstance -replace '/ws','')/ws/oauth/token" -Method Post -Body $body -ContentType 'application/x-www-form-urlencoded' -UseBasicParsing
-    
-            $Script:NinjaTokenExpiry = (Get-Date).AddSeconds(3000)
-            $Script:NinjaToken = $token
-            
-
-            Write-Host 'Fetched New Token'
-            return $token
-        } else {
-            Throw 'Please run Connect-NinjaOne first'
-        }
-    }
-
-}
-
-function Connect-NinjaOne {
-    [CmdletBinding()]
-    param (
-        [Parameter(mandatory = $true)]
-        $NinjaOneInstance,
-        [Parameter(mandatory = $true)]
-        $NinjaOneClientID,
-        [Parameter(mandatory = $true)]
-        $NinjaOneClientSecret,
-        $NinjaOneRefreshToken
-    )
-
-    $Script:NinjaOneInstance = $NinjaOneInstance
-    $Script:NinjaOneClientID = $NinjaOneClientID
-    $Script:NinjaOneClientSecret = $NinjaOneClientSecret
-    $Script:NinjaOneRefreshToken = $NinjaOneRefreshToken
-    
-
-    try {
-        $Null = Get-NinjaOneToken -ea Stop
-    } catch {
-        Throw "Failed to Connect to NinjaOne: $_"
-    }
-
-}
-
-function Invoke-NinjaOneRequest {
-    param(
-        $Method,
-        $Body,
-        $InputObject,
-        $Path,
-        $QueryParams,
-        [Switch]$Paginate,
-        [Switch]$AsArray
-    )
-
-    $Token = Get-NinjaOneToken
-
-    if ($InputObject) {
-        if ($AsArray) {
-            $Body = $InputObject | ConvertTo-Json -depth 100
-            if (($InputObject | Measure-Object).count -eq 1 ) {
-                $Body = '[' + $Body + ']'
-            }
-        } else {
-            $Body = $InputObject | ConvertTo-Json -depth 100
-        }
-    }
-
-    try {
-        if ($Method -in @('GET', 'DELETE')) {
-            if ($Paginate) {           
-                $After = 0
-                $PageSize = 1000
-                $NinjaResult = do {
-                    $Result = (Invoke-WebRequest -uri "https://$($Script:NinjaOneInstance)/api/v2/$($Path)?pageSize=$PageSize&after=$After$(if ($QueryParams){"&$QueryParams"})" -Method $Method -Headers @{Authorization = "Bearer $($token.access_token)" } -ContentType 'application/json' -UseBasicParsing).content | ConvertFrom-Json
-                    $Result
-                    $ResultCount = ($Result.id | Measure-Object -Maximum)
-                    $After = $ResultCount.maximum
-                } while (($Result | Measure-Object).count -eq $PageSize)
-
-                Return $NinjaResult
-
-            } else {
-                $NinjaResult = Invoke-WebRequest -uri "https://$($Script:NinjaOneInstance)/api/v2/$($Path)$(if ($QueryParams){"?$QueryParams"})" -Method $Method -Headers @{Authorization = "Bearer $($token.access_token)" } -ContentType 'application/json; charset=utf-8' -UseBasicParsing
-            }       
-
-        } elseif ($Method -in @('PATCH', 'PUT', 'POST')) {
-            $NinjaResult = Invoke-WebRequest -uri "https://$($Script:NinjaOneInstance)/api/v2/$($Path)$(if ($QueryParams){"?$QueryParams"})" -Method $Method -Headers @{Authorization = "Bearer $($token.access_token)" } -Body $Body -ContentType 'application/json; charset=utf-8' -UseBasicParsing
-        } else {
-            Throw 'Unknown Method'
-        }
-    } catch {
-        Throw "Error Occured: $_"
-    }
-
-    try {
-        return $NinjaResult.content | ConvertFrom-Json -ea stop
-    } catch {
-        return $NinjaResult.content
-    }
-
-}
 
 ############################### API Settings ###############################
 # NinjaOne
 
 try {
-    $NinjaOneClientID = ConvertSecureStringToPlainText -SecureString ($environmentSettings.NinjaOneClientID|ConvertTo-SecureString)
-    $NinjaOneClientSecret = ConvertSecureStringToPlainText -SecureString ($environmentSettings.NinjaOneClientSecret|ConvertTo-SecureString)
-}
-catch {
+    $NinjaOneClientID = ConvertSecureStringToPlainText -SecureString ($environmentSettings.NinjaOneClientID | ConvertTo-SecureString)
+    $NinjaOneClientSecret = ConvertSecureStringToPlainText -SecureString ($environmentSettings.NinjaOneClientSecret | ConvertTo-SecureString)
+} catch {
     Write-Host "Your NinjaOne API Credentials are not readable!!!" -ForegroundColor Yellow
     $NinjaOneClientID = Read-Host -Prompt "Enter the NinjaOne Client ID: "
     $environmentSettings.NinjaOneClientID = ConvertTo-SecureString -String $NinjaOneClientID -AsPlainText -Force | ConvertFrom-SecureString
@@ -432,9 +313,8 @@ $NinjaOneBaseDomain = $environmentSettings.NinjaOneBaseDomain
 $ITGAPIEndpoint = $environmentSettings.ITGAPIEndpoint
 
 try {
-    $ITGKey = ConvertSecureStringToPlainText -SecureString ($environmentSettings.ITGKey|ConvertTo-SecureString)
-}
-catch {
+    $ITGKey = ConvertSecureStringToPlainText -SecureString ($environmentSettings.ITGKey | ConvertTo-SecureString)
+} catch {
     Write-Host "Your ITG API Key is not readable!!!" -ForegroundColor Yellow
     $ITGKey = Read-Host 'Enter your ITGlue API Key. MAKE SURE TO USE AN API KEY WITH PASSWORD ACCESS'
     $environmentSettings.ITGKey = ConvertTo-SecureString -String $ITGKey -AsPlainText -Force | ConvertFrom-SecureString
@@ -451,26 +331,26 @@ $ITGLueExportPath = $environmentSettings.ITGLueExportPath
 
 
 # Choose if you want to resume previous attempts from the last successful section
-while ($resumeQuestion -notin ('yes','no')) {
-	$resumeQuestion = Read-Host "Would you like to resume a previous migration? (yes/no)"
+while ($resumeQuestion -notin ('yes', 'no')) {
+    $resumeQuestion = Read-Host "Would you like to resume a previous migration? (yes/no)"
 }
-$ResumePrevious = if ($resumeQuestion -eq 'yes') {$true} else {$false}
+$ResumePrevious = if ($resumeQuestion -eq 'yes') { $true } else { $false }
 $GlobalKBFolder = $environmentSettings.GlobalKBFolder
 
 # These settings should only run when doing a full settings initialization.
 if ($InitType -eq 'Full') {
     ############################### Company Settings ###############################
-    while ($ImportCompanies -notin (1,2)) {$ImportCompanies = Read-Host "1) Import Companies `n2) Skip Companies`n(1/2)"}
+    while ($ImportCompanies -notin (1, 2)) { $ImportCompanies = Read-Host "1) Import Companies `n2) Skip Companies`n(1/2)" }
     switch ($ImportCompanies) {
-        "1" {$ImportCompanies = $true}
-        "2" {$ImportCompanies = $false}
+        "1" { $ImportCompanies = $true }
+        "2" { $ImportCompanies = $false }
     }
 
     ############################### Location Settings ###############################
-    while ($ImportLocations -notin (1,2)) {$ImportLocations = Read-Host "1) Import Locations `n2) Skip Locations`n(1/2)"}
+    while ($ImportLocations -notin (1, 2)) { $ImportLocations = Read-Host "1) Import Locations `n2) Skip Locations`n(1/2)" }
     switch ($ImportLocations) {
-        "1" {$ImportLocations = $true}
-        "2" {$ImportLocations = $false}
+        "1" { $ImportLocations = $true }
+        "2" { $ImportLocations = $false }
     }
 
     # The asset layout name how locations will appear in Hudu
@@ -484,25 +364,23 @@ if ($InitType -eq 'Full') {
     $HuduPrimaryLocationNames = @("Primary Address")
 
     ############################### Domain / Website Settings ###############################
-    while ($ImportDomains -notin (1,2)) {$ImportDomains = Read-Host "Domains are used for Website, DNS and SSL Monitoring.`n 1) Import Domains`n 2) Skip Domains`n(1/2)"}
+    while ($ImportDomains -notin (1, 2)) { $ImportDomains = Read-Host "Domains are used for Website, DNS and SSL Monitoring.`n 1) Import Domains`n 2) Skip Domains`n(1/2)" }
     switch ($ImportDomains) {
-        "1" {$ImportDomains = $true}
-        "2" {$ImportDomains = $false}
+        "1" { $ImportDomains = $true }
+        "2" { $ImportDomains = $false }
     }
 
-    # Choose if you would like to enable monitoring for the imported websites.
-    while ($DisableWebsiteMonitoring -notin (1,2)) {$DisableWebsiteMonitoring = Read-Host "1) Leave Website Monitoring enabled `n2) Disable Website Monitoring`n(1/2)"}
-    switch ($DisableWebsiteMonitoring) {
-        "1" {$DisableWebsiteMonitoring = $false}
-        "2" {$DisableWebsiteMonitoring = $true}
-    }
+    $DomainImportAssetLayoutName = 'Domains'
 
-
-    ############################### Configuration Settings ###############################
-    while ($ImportConfigurations -notin (1,2)) {$ImportConfigurations = Read-Host "1) Import Configurations `n2) Skip Configurations`n(1/2)"}
+    ############################### Configuration Settings ###############################\
+    Write-Host "It is recommended to create devices in NinjaOne first, by either installing agents or monitoring them via NMS"
+    Write-Host "Configurations will then be matched to device names"
+    Write-Host "To Import configurations which don't match you must have NinjaOne IT Asset Management enabled."
+    Write-Host "Once enabled you must create Unmanaged device roles for configurations to then be matched to."
+    while ($ImportConfigurations -notin (1, 2)) { $ImportConfigurations = Read-Host "1) Import Configurations `n2) Skip Configurations`n(1/2)" }
     switch ($ImportConfigurations) {
-        "1" {$ImportConfigurations = $true}
-        "2" {$ImportConfigurations = $false}
+        "1" { $ImportConfigurations = $true }
+        "2" { $ImportConfigurations = $false }
     }
 
 
@@ -514,10 +392,10 @@ if ($InitType -eq 'Full') {
 
 
     ############################### Contact Settings ###############################
-    while ($ImportContacts -notin (1,2)) {$ImportContacts = Read-Host "1) Import Contacts `n2) Skip Contacts`n(1/2)"}
+    while ($ImportContacts -notin (1, 2)) { $ImportContacts = Read-Host "1) Import Contacts `n2) Skip Contacts`n(1/2)" }
     switch ($ImportContacts) {
-        "1" {$ImportContacts = $true}
-        "2" {$ImportContacts = $false}
+        "1" { $ImportContacts = $true }
+        "2" { $ImportContacts = $false }
     }
 
     # The asset layout name how locations will appear in Hudu
@@ -527,10 +405,10 @@ if ($InitType -eq 'Full') {
     $ConImportIcon = "fas fa-users"
 
     ############################### Flexible Asset Layouts ###############################
-    while ($ImportFlexibleAssetLayouts -notin (1,2)) {$ImportFlexibleAssetLayouts = Read-Host "1) Import Asset Layouts `n2) Skip Asset Layouts`n(1/2)"}
+    while ($ImportFlexibleAssetLayouts -notin (1, 2)) { $ImportFlexibleAssetLayouts = Read-Host "1) Import Asset Layouts `n2) Skip Asset Layouts`n(1/2)" }
     switch ($ImportFlexibleAssetLayouts) {
-        "1" {$ImportFlexibleAssetLayouts = $true}
-        "2" {$ImportFlexibleAssetLayouts = $false}
+        "1" { $ImportFlexibleAssetLayouts = $true }
+        "2" { $ImportFlexibleAssetLayouts = $false }
     }
 
     # Set if you would like a Prefix in front of Layout names created in Hudu. This can make it easy to review and you can rename them later set to ""if you don't want one
@@ -538,38 +416,38 @@ if ($InitType -eq 'Full') {
     $FlexibleLayoutPrefix = $environmentSettings.FAPromptPrefix
 
     ############################### Flexible Assets ###############################
-    while ($ImportFlexibleAssets -notin (1,2)) {$ImportFlexibleAssets = Read-Host "1) Import Assets `n2) Skip Assets`n(1/2)"}
+    while ($ImportFlexibleAssets -notin (1, 2)) { $ImportFlexibleAssets = Read-Host "1) Import Assets `n2) Skip Assets`n(1/2)" }
     switch ($ImportFlexibleAssets) {
-        "1" {$ImportFlexibleAssets = $true}
-        "2" {$ImportFlexibleAssets = $false}
+        "1" { $ImportFlexibleAssets = $true }
+        "2" { $ImportFlexibleAssets = $false }
     }
 
 
     ############################### Articles ###############################
-    while ($ImportArticles -notin (1,2)) {$ImportArticles = Read-Host "1) Import Articles `n2) Skip Articles`n(1/2)"}
+    while ($ImportArticles -notin (1, 2)) { $ImportArticles = Read-Host "1) Import Articles `n2) Skip Articles`n(1/2)" }
     switch ($ImportArticles) {
-        "1" {$ImportArticles = $true}
-        "2" {$ImportArticles = $false}
+        "1" { $ImportArticles = $true }
+        "2" { $ImportArticles = $false }
     }
 
     ############################### Passwords ###############################
-    while ($ImportPasswords -notin (1,2)) {$ImportPasswords = Read-Host "1) Import Passwords `n2) Skip Passwords`n(1/2)"}
+    while ($ImportPasswords -notin (1, 2)) { $ImportPasswords = Read-Host "1) Import Passwords `n2) Skip Passwords`n(1/2)" }
     switch ($ImportPasswords) {
-        "1" {$ImportPasswords = $true}
-        "2" {$ImportPasswords = $false}
+        "1" { $ImportPasswords = $true }
+        "2" { $ImportPasswords = $false }
     }
 
     ############################### Unattended ###############################
-    while ($NonInteractive -notin (1,2)) {$NonInteractive = Read-Host "1) Run normally `n2) Perform this migration noninteractively `n(1/2)"}
+    while ($NonInteractive -notin (1, 2)) { $NonInteractive = Read-Host "1) Run normally `n2) Perform this migration noninteractively `n(1/2)" }
     switch ($NonInteractive) {
-        "1" {$NonInteractive = $false}
-        "2" {$NonInteractive = $true}
+        "1" { $NonInteractive = $false }
+        "2" { $NonInteractive = $true }
     }    
     ############################### Unattended ###############################
-    while ($ScopedMigration -notin (1,2)) {$ScopedMigration = Read-Host "1) Run normally `n2) Perform migration scoped to certain companies `n(1/2)"}
+    while ($ScopedMigration -notin (1, 2)) { $ScopedMigration = Read-Host "1) Run normally `n2) Perform migration scoped to certain companies `n(1/2)" }
     switch ($ScopedMigration) {
-        "1" {$ScopedMigration = $false}
-        "2" {$ScopedMigration = $true}
+        "1" { $ScopedMigration = $false }
+        "2" { $ScopedMigration = $true }
     }        
 }
 ############################ Migration Logs Path ##############################
