@@ -1338,8 +1338,8 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Assets.json")) {
         }
 
         Read-Host "Pause"
-        Write-Host "$($MatchedAssets | ConvertTo-Json -Depth 100)"
-        Read-Host "Pause"
+        $MatchedAssets | ConvertTo-Json -depth 100 | Out-File "$MigrationLogs\Assets.json"
+        Read-Host "Assets written"
         
         # TEMP Import Assets Next
 	
@@ -1348,7 +1348,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Assets.json")) {
             Write-Host "Populating $($UpdateAsset.Name)"
 		
             $AssetFields = @{ 
-                'imported_from_itglue' = Get-Date -Format "o"
+                'itgImportDate' = Get-NinjaOneTime -Date $(Get-Date)
             }
 
             $traits = $UpdateAsset.ITGObject.attributes.traits
@@ -1366,89 +1366,111 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Assets.json")) {
                             "AccountsUsers" { Write-Host "Tags to Account Users are not supported $($field.FieldName) in $($UpdateAsset.Name) will need to be manually migrated, Sorry!"; $supported = $false }
                             "Checklists" { Write-Host "Tags to Checklists are not supported $($field.FieldName) in $($UpdateAsset.Name) will need to be manually migrated, Sorry!"; $supported = $false }
                             "ChecklistTemplates" { Write-Host "Tags to Checklists Templates are not supported $($field.FieldName) in $($UpdateAsset.Name) will need to be manually migrated, Sorry!"; $supported = $false }
-                            "Contacts" {
-                                $ContactsLinked = foreach ($IDMatch in $ITGValues.values) {
-                                    $($MatchedContacts | where-object -filter { $_.ITGID -eq $IDMatch.id } | Select-Object @{N = 'id'; E = { $_.HuduID } }, @{N = 'name'; E = { $_.Name } })
-                                }
-                                $ReturnData = $ContactsLinked | convertto-json -compress -AsArray | Out-String
-                                $null = $AssetFields.add("$($field.HuduParsedName)", ("$ReturnData"))
-											
-											
-                            }
+                            "Contacts" { Write-Host "Tags to Contacts are not supported $($field.FieldName) in $($UpdateAsset.Name) will need to be manually migrated, Sorry!"; $supported = $false }
                             "Configurations" {
-                                $ConfigsLinked = foreach ($IDMatch in $ITGValues.values) {
-                                    $($MatchedConfigurations | where-object -filter { $_.ITGID -eq $IDMatch.id } | Select-Object @{N = 'id'; E = { $_.HuduID } }, @{N = 'name'; E = { $_.Name } })
+                                [System.Collections.Generic.List[int]]$ConfigsLinked = foreach ($IDMatch in $ITGValues.values) {
+                                    $(($MatchedConfigurations | where-object -filter { $_.ITGID -eq $IDMatch.id }).NinjaOneID)
                                 }
-                                $ReturnData = $ConfigsLinked | convertto-json -compress -AsArray | Out-String
-                                $null = $AssetFields.add("$($field.HuduParsedName)", ("$ReturnData"))
+                                $ReturnData = @{
+                                    entityIds = $ConfigsLinked
+                                    type      = 'NODE'
+                                }
+                                $null = $AssetFields.add("$($field.NinjaOneParsedName)", ("$ReturnData"))
 											
                             }
-                            "Documents" { $RelationsToCreate += foreach ($IDMatch in $ITGValues.values) { @{hudu_from_id = $UpdateAsset.HuduID; relation_type = 'Article'; itg_to_id = $IDMatch.id } } ; Write-Host "Tags to Articles $($field.FieldName) in $($UpdateAsset.Name) has been recorded for later."; $supported = $true }
-                            "Domains" { 
-                                $DomainsLinked = foreach ($IDMatch in $ITGValues.values) {
-                                    $MatchedWebsites | Where-Object -filter { $_.ITGID -eq $IDMatch.id }
-                                } 
-                                $DomainsLinked | ForEach-Object {
-                                    if ($WebsiteRelation = New-HuduRelation -FromableType 'Asset' -ToableType 'Website' -FromableID $UpdateAsset.HuduID -ToableID $_.HuduID) {
-                                        Write-Host "Successully Created relation to $($WebsiteRelation.relation.name)"
-                                    } else { Write-Host "Tags to Websites are not supported $($field.FieldName) in $($UpdateAsset.Name) will need to be manually migrated, Sorry!"; $supported = $false }
-                                }
-                            }
-                            "Passwords" { $RelationsToCreate += foreach ($IDMatch in $ITGValues.values) { @{hudu_from_id = $UpdateAsset.HuduID; relation_type = 'AssetPassword'; itg_to_id = $IDMatch.id } }; Write-Host "Tags to Password $($field.FieldName) in $($UpdateAsset.Name) has been recorded for later."; $supported = $true }
+                            "Documents" { Write-Host "Tags to Documents are not supported $($field.FieldName) in $($UpdateAsset.Name) will need to be manually migrated, Sorry!"; $supported = $false }
+                            "Domains" { Write-Host "Tags to Domains are not supported $($field.FieldName) in $($UpdateAsset.Name) will need to be manually migrated, Sorry!"; $supported = $false }
+                            "Passwords" { Write-Host "Tags to Passwords are not supported $($field.FieldName) in $($UpdateAsset.Name) will need to be manually migrated, Sorry!"; $supported = $false }
                             "Locations" {
-                                $LocationsLinked = foreach ($IDMatch in $ITGValues.values) {
-                                    $($MatchedLocations | where-object -filter { $_.ITGID -eq $IDMatch.id } | Select-Object @{N = 'id'; E = { $_.HuduID } }, @{N = 'name'; E = { $_.Name } })
+                                [System.Collections.Generic.List[int]]$LocationsLinked = foreach ($IDMatch in $ITGValues.values) {
+                                    $(($MatchedLocations | where-object -filter { $_.ITGID -eq $IDMatch.id }).NinjaOneID)
                                 }
-                                $ReturnData = $LocationsLinked | convertto-json -compress -AsArray | Out-String
-                                $null = $AssetFields.add("$($field.HuduParsedName)", ("$ReturnData"))
+                                $ReturnData = @{
+                                    entityIds = $LocationsLinked
+                                    type      = 'CLIENT_LOCATION'
+                                }
+                                $null = $AssetFields.add("$($field.NinjaOneParsedNameName)", ("$ReturnData"))
 											
                             }
-                            "Organizations" { $RelationsToCreate += foreach ($IDMatch in $ITGValues.values) { @{hudu_from_id = $UpdateAsset.HuduID; relation_type = 'Company'; itg_to_id = $IDMatch.id } }; Write-Host "Tags to Companies $($field.FieldName) in $($UpdateAsset.Name) has been recorded later."; $supported = $true }
+                            "Organizations" { 
+                                [System.Collections.Generic.List[int]]$OrganizationsLinked = foreach ($IDMatch in $ITGValues.values) {
+                                    $(($MatchedLocations | where-object -filter { $_.ITGID -eq $IDMatch.id }).NinjaOneID)
+                                }
+                                $ReturnData = @{
+                                    entityIds = $OrganizationsLinked
+                                    type      = 'CLIENT'
+                                }
+                                $null = $AssetFields.add("$($field.NinjaOneParsedNameName)", ("$ReturnData"))
+                            }
                             "SslCertificates" { Write-Host "Tags to SSL Certificates are not supported $($field.FieldName) in $($UpdateAsset.Name) will need to be manually migrated, Sorry!"; $supported = $false }
                             "Tickets" { Write-Host "Tags to Tickets are not supported $($field.FieldName) in $($UpdateAsset.Name) will need to be manually migrated, Sorry!"; $supported = $false }
-                            "FlexibleAssetType" {	
-                                $AssetsLinked = foreach ($IDMatch in $ITGValues.values) {
-                                    $($MatchedAssets | where-object -filter { $_.ITGID -eq $IDMatch.id } | Select-Object @{N = 'id'; E = { $_.HuduID } }, @{N = 'name'; E = { $_.Name } })
-                                }
-                                $ReturnData = $AssetsLinked | convertto-json -compress -AsArray | Out-String
-                                $null = $AssetFields.add("$($field.HuduParsedName)", ("$ReturnData"))
-											
-                            }
-					
-
+                            "FlexibleAssetType" { Write-Host "Tags to Flexable Assets are not supported $($field.FieldName) in $($UpdateAsset.Name) will need to be manually migrated, Sorry!"; $supported = $false }
                         }
 
                         if ($Supported -eq $False) {
                             $ManualLog = [PSCustomObject]@{
-                                Document_Name = $UpdateAsset.Name
-                                Asset_Type    = $UpdateAsset.HuduObject.asset_type
-                                Company_Name  = $UpdateAsset.HuduObject.company_name
-                                HuduID        = $UpdateAsset.HuduID
-                                Field_Name    = $($field.FieldName)
-                                Notes         = "Unsupported Tag Type Manual Tag Required"
-                                Action        = "Manually tag to Asset"
-                                Data          = $ITGValues.values.name -join ","
-                                Hudu_URL      = $UpdateAsset.HuduObject.url
-                                ITG_URL       = $UpdateAsset.ITGObject.attributes."resource-url"
+                                Document_Name     = $UpdateAsset.Name
+                                Asset_Type        = $UpdateAsset.NinjaOneObject.documentTemplateName
+                                Organization_Name = ($MatchedCompanies | Where-Object { $_.NinjaOneID -eq $UpdateAsset.NinjaOneObject.organizationId }).CompanyName
+                                NinjaOneID        = $UpdateAsset.NinjaOneID
+                                Field_Name        = $($field.FieldName)
+                                Notes             = "Unsupported Tag Type Manual Tag Required"
+                                Action            = "Manually tag to Asset"
+                                Data              = $ITGValues.values.name -join ","
+                                NinjaOne_URL      = "https://$($NinjaOneBaseDomain)/#/customerDashboard/$($UpdateAsset.NinjaOneObject.organizationId)/documentation/appsAndServices/$($UpdateAsset.NinjaOneObject.documentTemplateId)/$($UpdateAsset.NinajOneID)"
+                                ITG_URL           = $UpdateAsset.ITGObject.attributes."resource-url"
                             }
                             $null = $ManualActions.add($ManualLog)
                         }
 
                     } else {
                         if ($field.FieldType -eq "Upload") {
-                            $ManualLog = [PSCustomObject]@{
-                                Document_Name = $UpdateAsset.Name
-                                Asset_Type    = $UpdateAsset.HuduObject.asset_type
-                                Company_Name  = $UpdateAsset.HuduObject.company_name
-                                HuduID        = $UpdateAsset.HuduID
-                                Field_Name    = $($field.FieldName)
-                                Notes         = "Uploads not supported"
-                                Action        = "Manually Upload files to Related Files"
-                                Data          = $ITGValues.values -join ","
-                                Hudu_URL      = $UpdateAsset.HuduObject.url
-                                ITG_URL       = $UpdateAsset.ITGObject.attributes."resource-url"
+                            $SupportedFiles = $ITGValues.values | Where-Object { ($_.name -split '\.')[-1] -in $NinjaOneSupportedUploadTypes }
+                            $UnsupportedFiles = $ITGValues.values | Where-Object { ($_.name -split '\.')[-1] -notin $NinjaOneSupportedUploadTypes }
+
+                            $SupportedFound = $False
+                            foreach ($SupportedFile in $SupportedFiles) {
+                                if ($SupportedFound -eq $False) {
+                                    $AttachedFile = Get-ChildItem -Path $ITGLueExportPath -Filter "$(($SupportedFile.url -split "/")[-1])-$($SupportedFile.name)" -Recurse
+                                    if (($AttachedFile | Measure-Object).count -eq 1) {
+                                        
+                                    } else {
+                                        Write-Error "Could not find $(($SupportedFile.url -split "/")[-1])-$($SupportedFile.name) in export or multiple files matched"
+                                        $ManualLog = [PSCustomObject]@{
+                                            Document_Name     = $UpdateAsset.Name
+                                            Asset_Type        = $UpdateAsset.NinjaOneObject.documentTemplateName
+                                            Organization_Name = ($MatchedCompanies | Where-Object { $_.NinjaOneID -eq $UpdateAsset.NinjaOneObject.organizationId }).CompanyName
+                                            NinjaOneID        = $UpdateAsset.NinjaOneID
+                                            Field_Name        = $($field.FieldName)
+                                            Notes             = "File not found in export"
+                                            Action            = "Could not find $(($SupportedFile.url -split "/")[-1])-$($SupportedFile.name) in export or multiple files matched"
+                                            Data              = $SupportedFile.name
+                                            NinjaOne_URL      = "https://$($NinjaOneBaseDomain)/#/customerDashboard/$($UpdateAsset.NinjaOneObject.organizationId)/documentation/appsAndServices/$($UpdateAsset.NinjaOneObject.documentTemplateId)/$($UpdateAsset.NinajOneID)"
+                                            ITG_URL           = $UpdateAsset.ITGObject.attributes."resource-url"
+                                        }
+                                        $null = $ManualActions.add($ManualLog)
+                                    }
+                                    
+                                }
+
                             }
-                            $null = $ManualActions.add($ManualLog)
+
+                            if (($UnsupportedFiles | Measure-Object).count -ge 1) {
+                                $ManualLog = [PSCustomObject]@{
+                                    Document_Name     = $UpdateAsset.Name
+                                    Asset_Type        = $UpdateAsset.NinjaOneObject.documentTemplateName
+                                    Organization_Name = ($MatchedCompanies | Where-Object { $_.NinjaOneID -eq $UpdateAsset.NinjaOneObject.organizationId }).CompanyName
+                                    NinjaOneID        = $UpdateAsset.NinjaOneID
+                                    Field_Name        = $($field.FieldName)
+                                    Notes             = "Unsupported file type"
+                                    Action            = "Zip file and manually upload to the field or related items."
+                                    Data              = $UnsupportedFiles.name -join ","
+                                    NinjaOne_URL      = "https://$($NinjaOneBaseDomain)/#/customerDashboard/$($UpdateAsset.NinjaOneObject.organizationId)/documentation/appsAndServices/$($UpdateAsset.NinjaOneObject.documentTemplateId)/$($UpdateAsset.NinajOneID)"
+                                    ITG_URL           = $UpdateAsset.ITGObject.attributes."resource-url"
+                                }
+                                $null = $ManualActions.add($ManualLog)
+                            }
+
                         } else {
 
                             if ($field.FieldType -eq "Password") {

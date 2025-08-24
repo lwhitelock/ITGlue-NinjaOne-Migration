@@ -309,6 +309,20 @@ try {
 # Set the base domain of your NinjaOne instance without a trailing /
 $NinjaOneBaseDomain = $environmentSettings.NinjaOneBaseDomain
 
+# NinjaOne supported file types
+$NinjaOneSupportedUploadTypes = @(
+    "jpg","jpeg","png","gif","cab","txt","log","pdf",
+    "csv","mp3","eml","dot","wbk","doc","docx","rtf",
+    "xls","xlsx","ods","ppt","pptx","pps","ppsx","sldx",
+    "vsd","vsdx","xml","html","zip","rar","tar"
+)
+
+$NinjaOneSupportedKBTypes = @(
+    "dot","wbk","doc","docx","rtf","xls","xlsx","ods",
+    "ppt","pptx","pps","ppsx","sldx","vsd","vsdx",
+    "wopitest","wopitestx","pdf"
+)
+
 # IT Glue - MAKE SURE TO USE AN API KEY WITH PASSWORD ACCESS
 $ITGAPIEndpoint = $environmentSettings.ITGAPIEndpoint
 
