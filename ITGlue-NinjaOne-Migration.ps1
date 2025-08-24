@@ -266,22 +266,41 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Companies.json")) {
                 Write-Host "Starting $($unmatchedcompany.CompanyName)"
                 $PrimaryLocation = $ITGLocations | Where-Object { $unmatchedcompany.ITGID -eq $_.attributes."organization-id" -and $_.attributes.primary -eq $true }
 
+                $OrgDescription = $unmatchedcompany.ITGCompanyObject.attributes."description"
+                if ($null -ne $OrgDescription) {
+                    if ($OrgDescripion.length -ge 1000) {
+                        $OrgDescripion = $OrgDescripion.SubString(0, 999)
+                    }
+                } else {
+                    $OrgDescription = ''
+                }
+
                 if ($PrimaryLocation -and $PrimaryLocation.count -eq 1) {
+
+                    $LocDescription = $PrimaryLocation.attributes."notes"
+                    if ($null -ne $LocDescription) {
+                        if ($LocDescription.length -ge 250) {
+                            $LocDescription = $LocDescription.SubString(0, 249)
+                        }
+                    } else {
+                        $LocDescription = ''
+                    }
+                    
                     $OrgCreation = @{
                         name        = $unmatchedcompany.CompanyName
-                        description = ($unmatchedcompany.ITGCompanyObject.attributes."description").SubString(0, 999)
+                        description = $OrgDescription
                         locations   = @(
                             @{
                                 name        = $PrimaryLocation.attributes."name"
                                 address     = (@($PrimaryLocation.attributes."address-1", $PrimaryLocation.attributes."address-2", $PrimaryLocation.attributes.city, $PrimaryLocation.attributes."region-name", $PrimaryLocation.attributes."postal-code", $PrimaryLocation.attributes."country-name") | Where-Object { $null -ne $_ }) -join "`r`n"
-                                description = ($PrimaryLocation.attributes."notes").SubString(0, 249)
+                                description = $LocDescription
                             }
                         )
                     }
                 } else {
                     $OrgCreation = @{
                         name        = $unmatchedcompany.CompanyName
-                        description = ($unmatchedcompany.ITGCompanyObject.attributes."description").SubString(0, 999)
+                        description = $OrgDescription
                     }
                 }
 
@@ -516,7 +535,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Domains.json")) {
 #Check for Configuration Resume
 if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Devices.json")) {
     Write-Host "Loading Previous Configurations Migration"
-    $MatchedConfigurations = Get-Content "$MigrationLogs\Devices.json" -raw | Out-String | ConvertFrom-Json -depth 100
+    $MatchedDevices = Get-Content "$MigrationLogs\Devices.json" -raw | Out-String | ConvertFrom-Json -depth 100
 } else {
 
     #Get Configurations from IT Glue
@@ -598,7 +617,6 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Devices.json")) {
     $UnmappedConfigurationssCount = ($MatchedDevices | Where-Object { $_.Matched -eq $false } | measure-object).count
     if ($ImportConfigurations -eq $true -and $UnmappedConfigurationssCount -gt 0) {        
         $ITGConfigTypes = ($MatchedDevices | Where-Object { $_.Matched -eq $false }).ITGObject.attributes."configuration-type-name" | Select-Object -unique
-        $MatchedConfigurations = New-Object System.Collections.ArrayList
 
         $NinjaOneRoles = Invoke-NinjaOneRequest -Method GET -Path 'roles' | Where-Object { $_.nodeClass -eq 'UNMANAGED_DEVICE' -and $_.name -ne 'UNMANAGED_DEVICE' }
 
@@ -645,7 +663,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Devices.json")) {
                     orgId               = $unmatcheddevice.NinjaOneOrgID
                     locationId          = $unmatcheddevice.NinjaOneLocID
                     roleId              = $RoleMap."$($unmatcheddevice."ITGObject".attributes."configuration-type-name")"
-                    # TEMP 'serialNumber'      = $unmatcheddevice."ITGObject".attributes."serial-number" ?? ""
+                    'serialNumber'      = $unmatcheddevice."ITGObject".attributes."serial-number" ?? ""
                     'warrantyEndDate'   = $(try { (Get-NinjaOneTime -Seconds -Date "$($unmatcheddevice."ITGObject".attributes."warranty-expires-at")" -ea stop) }catch { "" })
                     'warrantyStartDate' = $(try { (Get-NinjaOneTime -Seconds -Date "$($unmatcheddevice."ITGObject".attributes."purchased-at")" -ea stop) }catch { "" })
                 }
@@ -753,7 +771,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Contacts.json")) {
     $MatchedContacts | Sort-Object CompanyName, Name | Where-Object { $_.Matched -eq $false } | Select-Object CompanyName, Name, PrimaryEmail | Format-Table
 
 
-    # Import Devices
+    # Import Contacts
     $UnmappedContactsCount = ($MatchedContacts | Where-Object { $_.Matched -eq $false } | measure-object).count
     if ($ImportContacts -eq $true -and $UnmappedContactsCount -gt 0) {        
         
@@ -776,7 +794,6 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Contacts.json")) {
                     fullPortalAccess = $False
                     
                 }
-                Write-Host "$($unmatchedcontact | ConvertTo-Json -Depth 100)"
                 
                 try {
                     $NewNinjaOneContact = Invoke-NinjaOneRequest -Path "user/end-users" -Method POST -InputObject $ContactCreation -ea Stop
@@ -977,7 +994,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\AssetLayouts.json")) 
                         fieldDescription          = 'The date this asset was imported from IT Glue'
                         fieldType                 = 'DATE'
                         fieldTechnicianPermission = 'EDITABLE'
-                        fieldScriptPermission     = 'READ_ONLY'
+                        fieldScriptPermission     = 'NONE'
                         fieldApiPermission        = 'READ_WRITE'
                         fieldContent              = @{
                             required = $false
@@ -989,7 +1006,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\AssetLayouts.json")) 
                         fieldDescription          = 'The URL to the original item in ITGlue'
                         fieldType                 = 'URL'
                         fieldTechnicianPermission = 'EDITABLE'
-                        fieldScriptPermission     = 'READ_ONLY'
+                        fieldScriptPermission     = 'NONE'
                         fieldApiPermission        = 'READ_WRITE'
                         fieldContent              = @{
                             required = $false
@@ -1155,7 +1172,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\AssetLayouts.json")) 
                         fieldName                 = (ConvertTo-CamelCase -InputString $ITGField.Attributes.name)
                         fieldType                 = $NinjaOneFieldType
                         fieldTechnicianPermission = 'EDITABLE'
-                        fieldScriptPermission     = 'READ_ONLY'
+                        fieldScriptPermission     = 'NONE'
                         fieldApiPermission        = 'READ_WRITE'
                         fieldDefaultValue         = $ITGField.Attributes.'default-value' ?? ""
                         fieldContent              = $NinjaOneFieldContent
@@ -1321,7 +1338,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Assets.json")) {
                     $AssetDetails = [PSCustomObject]@{
                         "Name"           = $ITGAsset.attributes.name
                         "ITGID"          = $ITGAsset.id
-                        "NinjaOneID"     = $MatchedDocument.Id
+                        "NinjaOneID"     = $MatchedDocument.documentId
                         "Matched"        = $false
                         "NinjaOneObject" = $MatchedDocument
                         "ITGObject"      = $ITGAsset
@@ -1336,19 +1353,15 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Assets.json")) {
             }
 		
         }
-
-        Read-Host "Pause"
-        $MatchedAssets | ConvertTo-Json -depth 100 | Out-File "$MigrationLogs\Assets.json"
-        Read-Host "Assets written"
-        
-        # TEMP Import Assets Next
 	
         #We now need to loop through all Assets again updating the assets to their final version
+        [System.Collections.Generic.List[PSCustomObject]]$DocumentsToUpdate = @()
         foreach ($UpdateAsset in $MatchedAssets) {
             Write-Host "Populating $($UpdateAsset.Name)"
 		
             $AssetFields = @{ 
                 'itgImportDate' = Get-NinjaOneTime -Date $(Get-Date)
+                'itgUrl'        = $UpdateAsset.ITGObject.attributes.'resource-url'
             }
 
             $traits = $UpdateAsset.ITGObject.attributes.traits
@@ -1369,13 +1382,13 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Assets.json")) {
                             "Contacts" { Write-Host "Tags to Contacts are not supported $($field.FieldName) in $($UpdateAsset.Name) will need to be manually migrated, Sorry!"; $supported = $false }
                             "Configurations" {
                                 [System.Collections.Generic.List[int]]$ConfigsLinked = foreach ($IDMatch in $ITGValues.values) {
-                                    $(($MatchedConfigurations | where-object -filter { $_.ITGID -eq $IDMatch.id }).NinjaOneID)
+                                    $(($MatchedDevices | where-object -filter { $_.ITGID -eq $IDMatch.id }).NinjaOneID)
                                 }
                                 $ReturnData = @{
                                     entityIds = $ConfigsLinked
                                     type      = 'NODE'
                                 }
-                                $null = $AssetFields.add("$($field.NinjaOneParsedName)", ("$ReturnData"))
+                                $null = $AssetFields.add("$($field.NinjaOneParsedName)", ($ReturnData))
 											
                             }
                             "Documents" { Write-Host "Tags to Documents are not supported $($field.FieldName) in $($UpdateAsset.Name) will need to be manually migrated, Sorry!"; $supported = $false }
@@ -1389,7 +1402,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Assets.json")) {
                                     entityIds = $LocationsLinked
                                     type      = 'CLIENT_LOCATION'
                                 }
-                                $null = $AssetFields.add("$($field.NinjaOneParsedNameName)", ("$ReturnData"))
+                                $null = $AssetFields.add("$($field.NinjaOneParsedName)", ($ReturnData))
 											
                             }
                             "Organizations" { 
@@ -1400,7 +1413,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Assets.json")) {
                                     entityIds = $OrganizationsLinked
                                     type      = 'CLIENT'
                                 }
-                                $null = $AssetFields.add("$($field.NinjaOneParsedNameName)", ("$ReturnData"))
+                                $null = $AssetFields.add("$($field.NinjaOneParsedName)", ($ReturnData))
                             }
                             "SslCertificates" { Write-Host "Tags to SSL Certificates are not supported $($field.FieldName) in $($UpdateAsset.Name) will need to be manually migrated, Sorry!"; $supported = $false }
                             "Tickets" { Write-Host "Tags to Tickets are not supported $($field.FieldName) in $($UpdateAsset.Name) will need to be manually migrated, Sorry!"; $supported = $false }
@@ -1423,122 +1436,172 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Assets.json")) {
                             $null = $ManualActions.add($ManualLog)
                         }
 
-                    } else {
-                        if ($field.FieldType -eq "Upload") {
-                            $SupportedFiles = $ITGValues.values | Where-Object { ($_.name -split '\.')[-1] -in $NinjaOneSupportedUploadTypes }
-                            $UnsupportedFiles = $ITGValues.values | Where-Object { ($_.name -split '\.')[-1] -notin $NinjaOneSupportedUploadTypes }
+                    } elseif ($field.FieldType -eq "Upload") {
+                        $SupportedFiles = $ITGValues | Where-Object { ($_.name -split '\.')[-1] -in $NinjaOneSupportedUploadTypes }
+                        $UnsupportedFiles = $ITGValues | Where-Object { ($_.name -split '\.')[-1] -notin $NinjaOneSupportedUploadTypes }
 
-                            $SupportedFound = $False
-                            foreach ($SupportedFile in $SupportedFiles) {
-                                if ($SupportedFound -eq $False) {
-                                    $AttachedFile = Get-ChildItem -Path $ITGLueExportPath -Filter "$(($SupportedFile.url -split "/")[-1])-$($SupportedFile.name)" -Recurse
-                                    if (($AttachedFile | Measure-Object).count -eq 1) {
-                                        
-                                    } else {
-                                        Write-Error "Could not find $(($SupportedFile.url -split "/")[-1])-$($SupportedFile.name) in export or multiple files matched"
+                        $SupportedFound = $False
+                        foreach ($SupportedFile in $SupportedFiles) {
+
+                            if ($SupportedFound -eq $False) {
+                                $AttachedFile = Get-ChildItem -Path $ITGLueExportPath -Filter "$(($SupportedFile.url -split "/")[-1])-$($SupportedFile.name)" -Recurse
+                                if (($AttachedFile | Measure-Object).count -eq 1) {
+                                    try {
+                                        $FileResponse = Invoke-UploadNinjaOneFile -FileName $SupportedFile.name -FilePath $AttachedFile.VersionInfo.FileName -ContentType $SupportedFile.'content-type' -EntityType 'DOCUMENT' -ea stop
+                                        $null = $AssetFields.add("$($field.NinjaOneParsedName)", ($FileResponse))
+                                        $SupportedFound = $True
+
+                                    } catch {
+                                        Write-Error "$_"
                                         $ManualLog = [PSCustomObject]@{
                                             Document_Name     = $UpdateAsset.Name
                                             Asset_Type        = $UpdateAsset.NinjaOneObject.documentTemplateName
                                             Organization_Name = ($MatchedCompanies | Where-Object { $_.NinjaOneID -eq $UpdateAsset.NinjaOneObject.organizationId }).CompanyName
                                             NinjaOneID        = $UpdateAsset.NinjaOneID
                                             Field_Name        = $($field.FieldName)
-                                            Notes             = "File not found in export"
-                                            Action            = "Could not find $(($SupportedFile.url -split "/")[-1])-$($SupportedFile.name) in export or multiple files matched"
+                                            Notes             = "Failed uploading file"
+                                            Action            = "Upload of $(($SupportedFile.url -split "/")[-1])-$($SupportedFile.name) Failed"
                                             Data              = $SupportedFile.name
                                             NinjaOne_URL      = "https://$($NinjaOneBaseDomain)/#/customerDashboard/$($UpdateAsset.NinjaOneObject.organizationId)/documentation/appsAndServices/$($UpdateAsset.NinjaOneObject.documentTemplateId)/$($UpdateAsset.NinajOneID)"
                                             ITG_URL           = $UpdateAsset.ITGObject.attributes."resource-url"
                                         }
                                         $null = $ManualActions.add($ManualLog)
                                     }
-                                    
+                                        
+                                } else {
+                                    Write-Error "Could not find $(($SupportedFile.url -split "/")[-1])-$($SupportedFile.name) in export or multiple files matched"
+                                    $ManualLog = [PSCustomObject]@{
+                                        Document_Name     = $UpdateAsset.Name
+                                        Asset_Type        = $UpdateAsset.NinjaOneObject.documentTemplateName
+                                        Organization_Name = ($MatchedCompanies | Where-Object { $_.NinjaOneID -eq $UpdateAsset.NinjaOneObject.organizationId }).CompanyName
+                                        NinjaOneID        = $UpdateAsset.NinjaOneID
+                                        Field_Name        = $($field.FieldName)
+                                        Notes             = "File not found in export"
+                                        Action            = "Could not find $(($SupportedFile.url -split "/")[-1])-$($SupportedFile.name) in export or multiple files matched"
+                                        Data              = $SupportedFile.name
+                                        NinjaOne_URL      = "https://$($NinjaOneBaseDomain)/#/customerDashboard/$($UpdateAsset.NinjaOneObject.organizationId)/documentation/appsAndServices/$($UpdateAsset.NinjaOneObject.documentTemplateId)/$($UpdateAsset.NinajOneID)"
+                                        ITG_URL           = $UpdateAsset.ITGObject.attributes."resource-url"
+                                    }
+                                    $null = $ManualActions.add($ManualLog)
                                 }
-
-                            }
-
-                            if (($UnsupportedFiles | Measure-Object).count -ge 1) {
+                                
+                                    
+                            } else {
                                 $ManualLog = [PSCustomObject]@{
                                     Document_Name     = $UpdateAsset.Name
                                     Asset_Type        = $UpdateAsset.NinjaOneObject.documentTemplateName
                                     Organization_Name = ($MatchedCompanies | Where-Object { $_.NinjaOneID -eq $UpdateAsset.NinjaOneObject.organizationId }).CompanyName
                                     NinjaOneID        = $UpdateAsset.NinjaOneID
                                     Field_Name        = $($field.FieldName)
-                                    Notes             = "Unsupported file type"
-                                    Action            = "Zip file and manually upload to the field or related items."
-                                    Data              = $UnsupportedFiles.name -join ","
+                                    Notes             = "Multiple supported files found"
+                                    Action            = "Manual upload to related items of $(($SupportedFile.url -split "/")[-1])-$($SupportedFile.name) required"
+                                    Data              = $SupportedFile.name
                                     NinjaOne_URL      = "https://$($NinjaOneBaseDomain)/#/customerDashboard/$($UpdateAsset.NinjaOneObject.organizationId)/documentation/appsAndServices/$($UpdateAsset.NinjaOneObject.documentTemplateId)/$($UpdateAsset.NinajOneID)"
                                     ITG_URL           = $UpdateAsset.ITGObject.attributes."resource-url"
                                 }
                                 $null = $ManualActions.add($ManualLog)
                             }
 
-                        } else {
-
-                            if ($field.FieldType -eq "Password") {
-                                $ITGPassword = (Get-ITGluePasswords -id $ITGValues -include related_items).data
-                                $ITGPasswordValue = ($ITGPasswordsRaw | Where-Object { $_.id -eq $ITGPassword.id }).password
-                                try {
-                                    if ($ITGPasswordValue) {
-                                        $NewPasswordObject = [pscustomobject]@{
-                                            Name        = "$($UpdateAsset.name) $($Field.fieldname) $($ITGPassword.Username) Password"
-                                            Username    = $ITGPassword.Username
-                                            URL         = $ITGPassword.url
-                                            ITGID       = $ITGPassword.id
-                                            Description = $ITGpassword.notes
-                                            CompanyId   = $UpdateAsset.HuduObject.company_id
-                                            Password    = $ITGPasswordValue
-                                        };
-                                        $null = $AssetFields.add("$($field.HuduParsedName)", $ITGPasswordValue)
-                                        $MigratedPasswordStatus = "Into Asset"
-                                    }
-                                } catch {
-                                    Write-Host "Error occured adding field, possible duplicate name" -ForegroundColor Red
-                                    $ManualLog = [PSCustomObject]@{
-                                        Document_Name = $UpdateAsset.Name
-                                        Asset_Type    = "Asset Field"
-                                        Company_Name  = $UpdateAsset.HuduObject.company_name
-                                        HuduID        = $UpdateAsset.HuduID
-                                        Field_Name    = "$field.HuduParsedName"
-                                        Notes         = "Failed to add password to Asset"
-                                        Action        = "Manually add the password to the asset"
-                                        Data          = ($ITGPassword.attributes.'resource-url' -replace '[^\x09\x0A\x0D\x20-\xD7FF\xE000-\xFFFD\x10000\x10FFFF]')
-                                        Hudu_URL      = $UpdateAsset.HuduObject.url
-                                        ITG_URL       = $UpdateAsset.ITGObject.attributes.'resource-url'
-                                    }
-                                    $null = $ManualActions.add($ManualLog)
-                                    $MigratedPasswordStatus = "Failed to add"
-                                }
-                                $MigratedPassword = [PSCustomObject]@{
-                                    "Name"      = $ITGPassword.attributes.name
-                                    "ITGID"     = $ITGPassword.id
-                                    "HuduID"    = $UpdateAsset.HuduID
-                                    "Matched"   = $true
-                                    "ITGObject" = $ITGPassword
-                                    "Imported"  = $MigratedPasswordStatus
-                                }
-                                $null = $MatchedAssetPasswords.add($MigratedPassword)
-                            } else {
-                                if ($CurrentVersion -eq [version]"2.37.1") {
-                                    # This version won't cast doubles for 'number' fields. It expects only integers.
-                                    $coerced = Get-CastIfNumeric ($_.value -replace '[^\x09\x0A\x0D\x20-\xD7FF\xE000-\xFFFD\x10000\x10FFFF]')
-                                    $null = $AssetFields.add("$($field.HuduParsedName)", $coerced)
-                                } else {
-                                    $null = $AssetFields.add("$($field.HuduParsedName)", ($_.value -replace '[^\x09\x0A\x0D\x20-\xD7FF\xE000-\xFFFD\x10000\x10FFFF]'))
-                                }
-                            }
                         }
-                    }
 
+                        if (($UnsupportedFiles | Measure-Object).count -ge 1) {
+                            $ManualLog = [PSCustomObject]@{
+                                Document_Name     = $UpdateAsset.Name
+                                Asset_Type        = $UpdateAsset.NinjaOneObject.documentTemplateName
+                                Organization_Name = ($MatchedCompanies | Where-Object { $_.NinjaOneID -eq $UpdateAsset.NinjaOneObject.organizationId }).CompanyName
+                                NinjaOneID        = $UpdateAsset.NinjaOneID
+                                Field_Name        = $($field.FieldName)
+                                Notes             = "Unsupported file type"
+                                Action            = "Zip file and manually upload to the field or related items."
+                                Data              = $UnsupportedFiles.name -join ","
+                                NinjaOne_URL      = "https://$($NinjaOneBaseDomain)/#/customerDashboard/$($UpdateAsset.NinjaOneObject.organizationId)/documentation/appsAndServices/$($UpdateAsset.NinjaOneObject.documentTemplateId)/$($UpdateAsset.NinajOneID)"
+                                ITG_URL           = $UpdateAsset.ITGObject.attributes."resource-url"
+                            }
+                            $null = $ManualActions.add($ManualLog)
+                        }
+
+
+                    } elseif ($field.FieldType -eq "Password") {
+                        $ITGPassword = (Get-ITGluePasswords -id $ITGValues -include related_items).data
+                        $ITGPasswordValue = ($ITGPasswordsRaw | Where-Object { $_.id -eq $ITGPassword.id }).password
+                        try {
+                            if ($ITGPasswordValue) {
+                                $null = $AssetFields.add("$($field.NinjaOneParsedName)", $ITGPasswordValue)
+                                $MigratedPasswordStatus = "Into Asset"
+                            }
+                        } catch {
+                            Write-Host "Error occured adding field, possible duplicate name" -ForegroundColor Red
+                            $ManualLog = [PSCustomObject]@{
+                                Document_Name     = $UpdateAsset.Name
+                                Asset_Type        = $UpdateAsset.NinjaOneObject.documentTemplateName
+                                Organization_Name = ($MatchedCompanies | Where-Object { $_.NinjaOneID -eq $UpdateAsset.NinjaOneObject.organizationId }).CompanyName
+                                NinjaOneID        = $UpdateAsset.NinjaOneID
+                                Field_Name        = $($field.FieldName)
+                                Notes             = "Failed to add password to Asset"
+                                Action            = "Manually add the password to the asset"
+                                Data              = ($ITGPassword.attributes.'resource-url' -replace '[^\x09\x0A\x0D\x20-\xD7FF\xE000-\xFFFD\x10000\x10FFFF]')
+                                NinjaOne_URL      = "https://$($NinjaOneBaseDomain)/#/customerDashboard/$($UpdateAsset.NinjaOneObject.organizationId)/documentation/appsAndServices/$($UpdateAsset.NinjaOneObject.documentTemplateId)/$($UpdateAsset.NinajOneID)"
+                                ITG_URL           = $UpdateAsset.ITGObject.attributes."resource-url"
+                            }
+                            $null = $ManualActions.add($ManualLog)
+                            $MigratedPasswordStatus = "Failed to add"
+                        }
+
+                        $MigratedPassword = [PSCustomObject]@{
+                            "Name"       = $ITGPassword.attributes.name
+                            "ITGID"      = $ITGPassword.id
+                            "NinjaOneID" = $UpdateAsset.NinjaOneID
+                            "Matched"    = $true
+                            "ITGObject"  = $ITGPassword
+                            "Imported"   = $MigratedPasswordStatus
+                        }
+                        $null = $MatchedAssetPasswords.add($MigratedPassword)
+
+                    } elseif ($field.FieldType -eq "Date") {
+                        $null = $AssetFields.add("$($field.NinjaOneParsedName)", (Get-NinjaOneTime -Date $(Get-Date($_.value))))
+
+                    } elseif ($field.FieldType -eq "Textbox") {
+                        $null = $AssetFields.add("$($field.NinjaOneParsedName)", (@{html = $_.value -replace '[^\x09\x0A\x0D\x20-\xD7FF\xE000-\xFFFD\x10000\x10FFFF]' }))
+
+                    } elseif ($field.NinjaOneField.fieldType -eq 'NUMERIC') {
+                        $null = $AssetFields.add("$($field.NinjaOneParsedName)", ([int]$_.value))
+
+                    } else {
+                        $null = $AssetFields.add("$($field.NinjaOneParsedName)", ($_.value -replace '[^\x09\x0A\x0D\x20-\xD7FF\xE000-\xFFFD\x10000\x10FFFF]'))
+
+                    }
+                              
                 } else {
                     Write-Host "Warning $ITGParsed : $ITGValues Could not be added" -ForegroundColor Red
                 }
             }
 
-            $UpdatedHuduAsset = (Set-HuduAsset -asset_id $UpdateAsset.HuduID -name $UpdateAsset.name -company_id $($UpdateAsset.HuduObject.company_id) -asset_layout_id $UpdateAsset.HuduObject.asset_layout_id -fields $AssetFields).asset
+            $UpdateNinjaOneBody = @{
+                documentId   = $UpdateAsset.NinjaOneID
+                documentName = $UpdateAsset.NinjaOneObject.documentName
+                fields       = $AssetFields
+            }
 
-            $UpdateAsset.HuduObject = $UpdatedHuduAsset
+            $DocumentsToUpdate.add($UpdateNinjaOneBody)
+
             $UpdateAsset.Imported = "Created-By-Script"
         }
 
+        for ($i = 0; $i -lt $DocumentsToUpdate.Count; $i += 100) {
+            $start = $i
+            $end = [Math]::Min($i + 99, $DocumentsToUpdate.Count - 1)
+            $batch = @($DocumentsToUpdate[$start..$end])
+
+            try {
+                $Response = Invoke-NinjaOneRequest -InputObject $Batch -Method PATCH -Path 'organization/documents' -AsArray -es Stop
+            } catch {
+                Write-Error "One or more items in the batch request failed $_"
+                $Response = $_.Exception.Response | ConvertTo-Json -Depth 100
+            }
+
+        }
+
+        Read-Host 'End of apps and services pause'
 
         $MatchedAssets | ConvertTo-Json -depth 100 | Out-File "$MigrationLogs\Assets.json"
         $MatchedAssetPasswords | ConvertTo-Json -depth 100 | Out-File "$MigrationLogs\AssetPasswords.json"
@@ -1548,6 +1611,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Assets.json")) {
     }
 }
 
+# TEMP -- KB Articles next!
 
 ############################### Documents / Articles ###############################
 
@@ -2353,7 +2417,7 @@ Completed At: $(Get-Date -Format "o") <br />
 $(($MatchedCompanies | Measure-Object).count) : Companies Migrated <br />
 $(($MatchedLocations | Measure-Object).count) : Locations Migrated <br />
 $(($MatchedWebsites | Measure-Object).count) : Websites Migrated <br />
-$(($MatchedConfigurations | Measure-Object).count) : Configurations Migrated <br />
+$(($MatchedDevices | Measure-Object).count) : Configurations Migrated <br />
 $(($MatchedContacts | Measure-Object).count) : Contacts Migrated <br />
 $(($MatchedLayouts | Measure-Object).count) : Layouts Migrated <br />
 $(($MatchedAssets | Measure-Object).count) : Assets Migrated <br />
@@ -2403,7 +2467,7 @@ Write-Host "Completed At: $(Get-Date -Format "o")"
 Write-Host "$(($MatchedCompanies | Measure-Object).count) : Companies Migrated" -ForegroundColor Green
 Write-Host "$(($MatchedLocations | Measure-Object).count) : Locations Migrated" -ForegroundColor Green
 Write-Host "$(($MatchedWebsites | Measure-Object).count) : Websites Migrated" -ForegroundColor Green
-Write-Host "$(($MatchedConfigurations | Measure-Object).count) : Configurations Migrated" -ForegroundColor Green
+Write-Host "$(($MatchedDevices | Measure-Object).count) : Configurations Migrated" -ForegroundColor Green
 Write-Host "$(($MatchedContacts | Measure-Object).count) : Contacts Migrated" -ForegroundColor Green
 Write-Host "$(($MatchedLayouts | Measure-Object).count) : Layouts Migrated" -ForegroundColor Green
 Write-Host "$(($MatchedAssets | Measure-Object).count) : Assets Migrated" -ForegroundColor Green

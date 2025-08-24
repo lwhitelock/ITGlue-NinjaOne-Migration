@@ -38,6 +38,80 @@ function Get-NinjaOneToken {
     }
 
 }
+function Get-OAuthCode {
+    param (
+        [System.UriBuilder]$AuthURL,
+        [string]$RedirectURL
+    )
+    $HTTP = [System.Net.HttpListener]::new()
+    $HTTP.Prefixes.Add($RedirectURL)
+    $HTTP.Start()
+    Start-Process $AuthURL.ToString()
+    $Result = @{}
+    while ($HTTP.IsListening) {
+        $Context = $HTTP.GetContext()
+        if ($Context.Request.QueryString -and $Context.Request.QueryString['Code']) {
+            $Result.Code = $Context.Request.QueryString['Code']
+            if ($null -ne $Result.Code) {
+                $Result.GotAuthorisationCode = $True
+            }
+            [string]$HTML = @"
+            <html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>NinjaOne Authorization Code</title>
+    <style>
+        body {
+            background-color: #f0f2f5;
+            font-family: Arial, sans-serif;
+            margin: 0;
+        }
+        .card {
+            max-width: 500px;
+            margin: 100px auto;
+            background-color: #ffffff;
+            padding: 40px 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        .card h1 {
+            margin-bottom: 20px;
+            font-size: 24px;
+            color: #333333;
+        }
+        .card p {
+            margin: 10px 0;
+            font-size: 16px;
+            color: #555555;
+        }
+        .checkmark {
+            font-size: 60px;
+            color: #28a745;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="checkmark">&#10004;</div>
+        <h1>NinjaOne Login Successful</h1>
+        <p>An authorization code has been received successfully.</p>
+        <p>Please close this tab and return to the import tool Window.</p>
+    </div>
+</body>
+</html>
+"@
+            $Response = [System.Text.Encoding]::UTF8.GetBytes($HTML)
+            $Context.Response.ContentLength64 = $Response.Length
+            $Context.Response.OutputStream.Write($Response, 0, $Response.Length)
+            $Context.Response.OutputStream.Close()
+            Start-Sleep -Seconds 1
+            $HTTP.Stop()
+        }
+    }
+    Return $Result
+}
 
 function Connect-NinjaOne {
     [CmdletBinding()]
@@ -51,10 +125,24 @@ function Connect-NinjaOne {
         $NinjaOneRefreshToken
     )
 
+    $AuthURL = "https://$NinjaOneInstance/ws/oauth/authorize?response_type=code&client_id=$NinjaOneClientID&redirect_uri=$NinjaOneRedirectURL&scope=monitoring%20management%20offline_access&state=STATE"
+
+    $Result = Get-OAuthCode -AuthURL $AuthURL -RedirectURL $NinjaOneRedirectURL
+
+    $AuthBody = @{
+        'grant_type'    = 'authorization_code'
+        'client_id'     = $NinjaOneClientID
+        'client_secret' = $NinjaOneClientSecret
+        'code'          = $Result.code
+        'redirect_uri'  = $NinjaOneRedirectURL 
+    }
+
+    $Result = Invoke-WebRequest -uri "https://$($NinjaOneInstance)/ws/oauth/token" -Method POST -Body $AuthBody -ContentType 'application/x-www-form-urlencoded'
+
     $Script:NinjaOneInstance = $NinjaOneInstance
     $Script:NinjaOneClientID = $NinjaOneClientID
     $Script:NinjaOneClientSecret = $NinjaOneClientSecret
-    $Script:NinjaOneRefreshToken = $NinjaOneRefreshToken
+    $Script:NinjaOneRefreshToken = ($Result.content | ConvertFrom-Json).refresh_token
     
 
     try {
@@ -207,3 +295,28 @@ function Get-NinjaOneTime {
     }
 }
 
+function Invoke-UploadNinjaOneFile($FileName, $FilePath, $ContentType, $EntityType) {
+
+    try {
+        $multipartContent = [System.Net.Http.MultipartFormDataContent]::new()
+        $FileStream = [System.IO.FileStream]::new($FilePath, [System.IO.FileMode]::Open)
+        $fileHeader = [System.Net.Http.Headers.ContentDispositionHeaderValue]::new("form-data")
+        $fileHeader.Name = 'files'
+        $fileHeader.FileName = $FileName
+        $fileContent = [System.Net.Http.StreamContent]::new($FileStream)
+        $fileContent.Headers.ContentDisposition = $fileHeader
+        $fileContent.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse($ContentType)
+        $multipartContent.Add($fileContent)
+        if ($EntityType) {
+            $URI = "https://$($NinjaOneInstance)/ws/api/v2/attachments/temp/upload?entityType=$EntityType"
+        } else {
+            $URI = "https://$($NinjaOneInstance)/ws/api/v2/attachments/temp/upload"
+        }
+        $Result = (Invoke-WebRequest -Uri $URI -Body $multipartContent -Method 'POST' -Headers @{Authorization = "Bearer $(($(Get-NinjaOneToken)).access_token)" }).content | ConvertFrom-Json -Depth 100
+        $FileStream.close()
+        return $Result
+    } catch {
+        Throw "Failed to upload file: $_"
+    }
+
+}

@@ -304,7 +304,7 @@ try {
     UpdateSavedSettings -newSettings $environmentSettings
 }
 
-
+$NinjaOneRedirectURL = 'http://localhost:9193/'
 
 # Set the base domain of your NinjaOne instance without a trailing /
 $NinjaOneBaseDomain = $environmentSettings.NinjaOneBaseDomain
