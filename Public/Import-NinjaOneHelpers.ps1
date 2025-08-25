@@ -308,15 +308,110 @@ function Invoke-UploadNinjaOneFile($FileName, $FilePath, $ContentType, $EntityTy
         $fileContent.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse($ContentType)
         $multipartContent.Add($fileContent)
         if ($EntityType) {
-            $URI = "https://$($NinjaOneInstance)/ws/api/v2/attachments/temp/upload?entityType=$EntityType"
+            $URI = "https://$($Script:NinjaOneInstance)/ws/api/v2/attachments/temp/upload?entityType=$EntityType"
         } else {
-            $URI = "https://$($NinjaOneInstance)/ws/api/v2/attachments/temp/upload"
+            $URI = "https://$($Script:NinjaOneInstance)/ws/api/v2/attachments/temp/upload"
         }
         $Result = (Invoke-WebRequest -Uri $URI -Body $multipartContent -Method 'POST' -Headers @{Authorization = "Bearer $(($(Get-NinjaOneToken)).access_token)" }).content | ConvertFrom-Json -Depth 100
         $FileStream.close()
         return $Result
     } catch {
+        $FileStream.close()
         Throw "Failed to upload file: $_"
+    }
+
+}
+
+function Get-MimeType {
+    param([string]$Path)
+
+    $ext = [IO.Path]::GetExtension($Path).ToLowerInvariant()
+
+    switch ($ext) {
+        ".jpg" { "image/jpeg" }
+        ".jpeg" { "image/jpeg" }
+        ".png" { "image/png" }
+        ".gif" { "image/gif" }
+        ".cab" { "application/vnd.ms-cab-compressed" }
+        ".txt" { "text/plain" }
+        ".log" { "text/plain" }
+        ".pdf" { "application/pdf" }
+        ".csv" { "text/csv" }
+        ".mp3" { "audio/mpeg" }
+        ".eml" { "message/rfc822" }
+        ".dot" { "application/msword" }
+        ".wbk" { "application/msword" }
+        ".doc" { "application/msword" }
+        ".docx" { "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }
+        ".rtf" { "application/rtf" }
+        ".xls" { "application/vnd.ms-excel" }
+        ".xlsx" { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }
+        ".ods" { "application/vnd.oasis.opendocument.spreadsheet" }
+        ".ppt" { "application/vnd.ms-powerpoint" }
+        ".pptx" { "application/vnd.openxmlformats-officedocument.presentationml.presentation" }
+        ".pps" { "application/vnd.ms-powerpoint" }
+        ".ppsx" { "application/vnd.openxmlformats-officedocument.presentationml.slideshow" }
+        ".sldx" { "application/vnd.openxmlformats-officedocument.presentationml.slide" }
+        ".vsd" { "application/vnd.visio" }
+        ".vsdx" { "application/vnd.ms-visio.drawing.main+xml" }
+        ".xml" { "application/xml" }
+        ".html" { "text/html" }
+        ".zip" { "application/zip" }
+        ".rar" { "application/vnd.rar" }
+        ".tar" { "application/x-tar" }
+        default { "application/octet-stream" }
+    }
+}
+
+function Invoke-UploadNinjaOneKBArticle {
+    param (
+        $FileName,
+        $FilePath,
+        $FolderPath,
+        $OrganizationID,
+        $FailCount = 0
+    )
+
+    try {
+        $multipartContent = [System.Net.Http.MultipartFormDataContent]::new()
+        # Only add fields that were provided
+        if ($null -ne $OrganizationID) {
+            $multipartContent.Add([System.Net.Http.StringContent]::new($OrganizationId), 'organizationId')
+        }
+        if ($FolderPath -ne '') {
+            $multipartContent.Add([System.Net.Http.StringContent]::new($FolderPath), 'folderPath')
+        }
+
+        $MimeType = Get-MimeType $FilePath
+
+        $FileStream = [System.IO.FileStream]::new($FilePath, [System.IO.FileMode]::Open)
+        $fileHeader = [System.Net.Http.Headers.ContentDispositionHeaderValue]::new("form-data")
+        $fileHeader.Name = 'files'
+        $fileHeader.FileName = $FileName
+        $fileContent = [System.Net.Http.StreamContent]::new($FileStream)
+        $fileContent.Headers.ContentDisposition = $fileHeader
+        $fileContent.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse($MimeType)
+        $multipartContent.Add($fileContent)
+
+        $URI = "https://$($Script:NinjaOneInstance)/ws/api/v2/knowledgebase/articles/upload"
+        $Result = (Invoke-WebRequest -Uri $URI -Body $multipartContent -Method 'POST' -Headers @{Authorization = "Bearer $(($(Get-NinjaOneToken)).access_token)" }).content | ConvertFrom-Json -Depth 100
+        $FileStream.close()
+        return $Result
+    } catch {
+        $FileStream.close()
+        if ($Failcount -le 9) {
+            $Failcount++
+            Write-Host "Upload failed retrying: $Failcount"
+            try {
+                $Result = Invoke-UploadNinjaOneKBArticle -FileName $FileName -FilePath $FilePath -FolderPath $FolderPath -OrganizationID $OrganizationID -Failcount $Failcount -ea stop
+                return $result
+            } catch {
+                Throw $_
+            }
+        } else {
+            $FileStream.close()
+            Throw "Failed to upload file: $_"
+        }     
     }
 
 }

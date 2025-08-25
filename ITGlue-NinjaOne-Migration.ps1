@@ -1322,7 +1322,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Assets.json")) {
                 $end = [Math]::Min($i + 99, $DocumentsToCreate.Count - 1)
                 $batch = @($DocumentsToCreate[$start..$end])
                 try {
-                    $null = Invoke-NinjaOneRequest -InputObject $Batch -Method POST -Path 'organization/documents' -AsArray -es Stop
+                    $null = Invoke-NinjaOneRequest -InputObject $Batch -Method POST -Path 'organization/documents' -AsArray -ea Stop
                 } catch {
                     Write-Error "One or more items in the batch request failed $_"
                 }
@@ -1593,10 +1593,9 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Assets.json")) {
             $batch = @($DocumentsToUpdate[$start..$end])
 
             try {
-                $Response = Invoke-NinjaOneRequest -InputObject $Batch -Method PATCH -Path 'organization/documents' -AsArray -es Stop
+                $null = Invoke-NinjaOneRequest -InputObject $Batch -Method PATCH -Path 'organization/documents' -AsArray -ea Stop
             } catch {
                 Write-Error "One or more items in the batch request failed $_"
-                $Response = $_.Exception.Response | ConvertTo-Json -Depth 100
             }
 
         }
@@ -1611,8 +1610,6 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Assets.json")) {
     }
 }
 
-# TEMP -- KB Articles next!
-
 ############################### Documents / Articles ###############################
 
 #Check for Article Resume
@@ -1622,124 +1619,263 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\ArticleBase.json")) {
 } else {
 
     if ($ImportArticles -eq $true) {
+        [System.Collections.Generic.List[PSCustomObject]]$AllKBArticles = @()
 
-        if ($GlobalKBFolder -in ('y', 'yes', 'ye')) {
-            if (-not ($GlobalKBFolder = Get-HuduFolders -name $InternalCompany)) {
-                $GlobalKBFolder = (New-HuduFolder -Name $InternalCompany).folder
-            }
-        } else {
-            $GlobalKBFolder = $null
-        }
-	
+        [System.Collections.Generic.List[PSCustomObject]]$OrgNinjaKBArticles = Invoke-NinjaOneRequest -Method GET -Path 'knowledgebase/organization/articles'
+        [System.Collections.Generic.List[PSCustomObject]]$GlobalNinjaKBArticles = Invoke-NinjaOneRequest -Method GET -Path 'knowledgebase/global/articles'
+
+        $AllKBArticles.AddRange($OrgNinjaKBArticles)
+        $AllKBArticles.AddRange($GlobalNinjaKBArticles)
 
         $ITGDocuments = Import-CSV -Path (Join-Path -path $ITGLueExportPath -ChildPath "documents.csv")
         [string]$ITGDocumentsPath = Join-Path -path $ITGLueExportPath -ChildPath "Documents"
+        [string]$ITGAttachmentsPath = Join-Path -path $ITGLueExportPath -ChildPath "attachments"
 
         $files = Get-ChildItem -Path $ITGDocumentsPath -recurse
+        $attachmentFiles = Get-ChildItem -Path $ITGAttachmentsPath -recurse
+
+        [System.Collections.Generic.List[PSCustomObject]]$ArticlesToCreate = @()
 
         # First lets find each article in the file system and then create blank stubs for them all so we can match relations later
         $MatchedArticles = Foreach ($doc in $ITGDocuments) {
             Write-Host "Starting $($doc.name)" -ForegroundColor Green
+
             $dir = $files | Where-Object { $_.PSIsContainer -eq $true -and $_.Name -match $doc.locator }
             $RelativePath = ($dir.FullName).Substring($ITGDocumentsPath.Length)
             $folders = $RelativePath -split '\\'
             $FilenameFromFolder = ($folders[$folders.count - 1] -split ' ', 2)[1]
             $Filename = $FilenameFromFolder
 
-            $pathtest = Test-Path -LiteralPath "$($dir.Fullname)\$($filename).html"
-
-            if ($pathtest -eq $false) {
-                $filename = $doc.name
-                $pathtest = Test-Path -LiteralPath "$($dir.Fullname)\$($filename).html"
-                if ($pathtest -eq $false) {
-                    $filename = $FilenameFromFolder -replace '_', '$1,$2'
-                    $pathtest = Test-Path -LiteralPath "$($dir.Fullname)\$($filename).html"
-                    if ($pathtest -eq $false) {
-                        Write-Host "Not Found $($dir.Fullname)\$($filename).html this article will need to be migrated manually" -foregroundcolor red
-                        continue
-                    }
-                }
-	
-            }
-
-
             $company = $MatchedCompanies | where-object -filter { $_.CompanyName -eq $doc.organization }
-            if (($company | Measure-Object).count -eq 1) {
-
-                $art_folder_id = $null
-                if ($company.InternalCompany -eq $false) {
-                    if (($folders | Measure-Object).count -gt 2) {
-                        # Make / Check Folders
-
-                        $art_folder_id = (Initialize-HuduFolder $folders[1..$($folders.count - 2)] -company_id $company.HuduID).id
-                    }
-                    $ArticleSplat = @{
-                        name       = $doc.name
-                        content    = "Migration in progress"
-                        company_id = $company.HuduID
-                        folder_id  = $art_folder_id
-                    }	
-                } else {
-                    if (($folders | Measure-Object).count -gt 2) {
-                        # Make / Check Folders
-                        $folders = $folders[1..$($folders.count - 2)]
-                        if ($GlobalKBFolder) {
-                            $folders = @($GlobalKBFolder.name) + $folders
-                        }
-                        $art_folder_id = (Initialize-HuduFolder $folders).id
-                    } else {
-                        # Check for GlobalKB Folder being set
-                        if ($GlobalKBFolder) {
-                            $art_folder_id = $GlobalKBFolder.id
-                        }
-                    }
-                    $ArticleSplat = @{
-                        name      = $doc.name
-                        content   = "Migration in progress"
-                        folder_id = $art_folder_id
-                    }	
-                }
-		
-
-
-
-            } else {
+            if (($company | Measure-Object).count -ne 1) {
                 Write-Host "Company $($doc.organization) Not Found Please migrate $($doc.name) manually"
                 continue
             }
 
-
-            $NewArticle = (New-HuduArticle @ArticleSplat).article
-            if ($company.InternalCompany -eq $false) {
-                Write-Host "Article created in $($company.CompanyName)"
+            if (($folders | Measure-Object).count -gt 2) {
+                $folders = ($folders[1..$($folders.count - 2)]) -join '|'
             } else {
-                Write-Host "Article created in GlobaL KB"
+                $folders = ''
             }
 
+            # Handle uploading files rather than HTML based documents
+            if (($Doc.name -split '\.')[-1] -in $NinjaOneSupportedKBTypes) {
+                
+                # Check if exists
+                $NinjaArticle = $AllKBArticles | Where-Object { $_.isNinjaArticle -eq $false -and ($_.organizationId -eq $company.NinjaOneID -or ($company.InternalCompany -eq $true -and $_.organizationId -eq $null)) -and $_.path -like "*$($folders)" -and $_.name -eq [io.path]::GetFileNameWithoutExtension($doc.name) }
+                if (($NinjaArticle | Measure-Object).count -ge 1) {
+                    Write-Host "Existing Uploaded document found"
+                    [PSCustomObject]@{
+                        "Name"           = $doc.name
+                        "Filename"       = $Filename
+                        "Path"           = $($dir.Fullname)
+                        "FullPath"       = "$($dir.Fullname)\$($filename).html"
+                        "ITGID"          = $doc.id
+                        "ITGLocator"     = $doc.locator
+                        "NinjaOneID"     = $NinjaArticle.id
+                        "NinjaOneObject" = $NinjaArticle
+                        "Folders"        = $folders
+                        "Imported"       = "Uploaded"
+                        "Company"        = $company
+                        "ArticleType"    = 'FileUpload'
+                    }
+                    continue
+                }
 
-            [PSCustomObject]@{
-                "Name"       = $doc.name
-                "Filename"   = $Filename
-                "Path"       = $($dir.Fullname)
-                "FullPath"   = "$($dir.Fullname)\$($filename).html"
-                "ITGID"      = $doc.id
-                "ITGLocator" = $doc.locator
-                "HuduID"     = $NewArticle.ID
-                "HuduObject" = $NewArticle
-                "Folders"    = $folders
-                "Imported"   = "Stub-Created"
-                "Company"    = $company
-            }
+                $dir = $attachmentFiles | Where-Object { $_.PSIsContainer -eq $true -and $_.Name -match $doc.id }
+                $Path = "$($dir.Fullname)\$((($doc.name) -replace '\+', '_') -replace ' ','_')" 
+                $pathtest = Test-Path -LiteralPath $Path
+                if ($pathtest -eq $true) {
+                    try {
+                        if ($company.InternalCompany -eq $false) {
+                            $UploadedFile = Invoke-UploadNinjaOneKBArticle -FileName $doc.name -FilePath $Path -FolderPath $Folders -OrganizationID $company.NinjaOneID -ea stop
+                        } else {
+                            $UploadedFile = Invoke-UploadNinjaOneKBArticle -FileName $doc.name -FilePath $Path -FolderPath $Folders -ea stop
+                        }
+                        [PSCustomObject]@{
+                            "Name"           = $doc.name
+                            "Filename"       = $Filename
+                            "Path"           = $($dir.Fullname)
+                            "FullPath"       = $Path
+                            "ITGID"          = $doc.id
+                            "ITGLocator"     = $doc.locator
+                            "NinjaOneID"     = $UploadedFile.id
+                            "NinjaOneObject" = $UploadedFile
+                            "Folders"        = $folders
+                            "Imported"       = "Uploaded"
+                            "Company"        = $company
+                            "ArticleType"    = 'FileUpload'
+                        }                        
+                    } catch {
+                        Write-Error "File upload failed $($dir.Fullname)\$($filename): $_"
+                        [PSCustomObject]@{
+                            "Name"           = $doc.name
+                            "Filename"       = $Filename
+                            "Path"           = $($dir.Fullname)
+                            "FullPath"       = "$($dir.Fullname)\$($doc.name)" -replace '\+', '_'
+                            "ITGID"          = $doc.id
+                            "ITGLocator"     = $doc.locator
+                            "NinjaOneID"     = ''
+                            "NinjaOneObject" = ''
+                            "Folders"        = $folders
+                            "Imported"       = "Failed"
+                            "Company"        = $company
+                            "ArticleType"    = 'FileUpload'
+                        }                        
+                    }
+                
+                } else {
+                    Write-Error "File was not found to upload $($dir.Fullname)\$($filename)"
+                    [PSCustomObject]@{
+                        "Name"           = $doc.name
+                        "Filename"       = $Filename
+                        "Path"           = $($dir.Fullname)
+                        "FullPath"       = "$($dir.Fullname)\$($filename)"
+                        "ITGID"          = $doc.id
+                        "ITGLocator"     = $doc.locator
+                        "NinjaOneID"     = ''
+                        "NinjaOneObject" = ''
+                        "Folders"        = $folders
+                        "Imported"       = "NotFound"
+                        "Company"        = $company
+                        "ArticleType"    = 'FileUpload'
+                    }
+                }
 
+                
+            } else {
+                # Process HTML Based Articles
+                # Check if exists
+                $NinjaArticle = $AllKBArticles | Where-Object { $_.content.html -eq $doc.id }
+                if (($NinjaArticle | Measure-Object).count -ge 1) {
+                    Write-Host "Existing Stub Document Found skipping creation"
+                    [PSCustomObject]@{
+                        "Name"           = $doc.name
+                        "Filename"       = $Filename
+                        "Path"           = $($dir.Fullname)
+                        "FullPath"       = "$($dir.Fullname)\$($filename).html"
+                        "ITGID"          = $doc.id
+                        "ITGLocator"     = $doc.locator
+                        "NinjaOneID"     = $NinjaArticle.id
+                        "NinjaOneObject" = $NinjaArticle
+                        "Folders"        = $folders
+                        "Imported"       = "Stub-Created"
+                        "Company"        = $company
+                        "ArticleType"    = 'HTML'
+                    }
+                    continue
+                }
+
+                $pathtest = Test-Path -LiteralPath "$($dir.Fullname)\$($filename).html"
+
+                if ($pathtest -eq $false) {
+                    $filename = $doc.name
+                    $pathtest = Test-Path -LiteralPath "$($dir.Fullname)\$($filename).html"
+                    if ($pathtest -eq $false) {
+                        $filename = $FilenameFromFolder -replace '_', '$1,$2'
+                        $pathtest = Test-Path -LiteralPath "$($dir.Fullname)\$($filename).html"
+                        if ($pathtest -eq $false) {
+                            Write-Host "Not Found $($dir.Fullname)\$($filename).html this article will need to be migrated manually" -foregroundcolor red
+                            continue
+                        }
+                    }
 	
+                }
+                
+                if ($company.InternalCompany -eq $false) {
+                    $ArticleCreate = @{
+                        name                  = $doc.name
+                        organizationId        = $company.NinjaOneID
+                        destinationFolderPath = $folders
+                        content               = @{
+                            html = "$($Doc.id)"
+                        }
+                    }
+
+                } else {
+                    # Set sub folder if set for global KB
+                    if ($GlobalKBFolder) {
+                        if ($folders -ne '') {
+                            $folders = "$($GlobalKBFolder)|" + $folders
+                        } else {
+                            $folders = $GlobalKBFolder
+                        }
+                    }
+
+                    $ArticleCreate = @{
+                        name                  = $doc.name
+                        destinationFolderPath = $folders
+                        content               = @{
+                            html = "$($Doc.id)"
+                        }
+                    }
+                }
+		
+                $null = $ArticlesToCreate.add($ArticleCreate)
+
+                [PSCustomObject]@{
+                    "Name"           = $doc.name
+                    "Filename"       = $Filename
+                    "Path"           = $($dir.Fullname)
+                    "FullPath"       = "$($dir.Fullname)\$($filename).html"
+                    "ITGID"          = $doc.id
+                    "ITGLocator"     = $doc.locator
+                    "NinjaOneID"     = ''
+                    "NinjaOneObject" = ''
+                    "Folders"        = $folders
+                    "Imported"       = "Batched"
+                    "Company"        = $company
+                    "ArticleType"    = 'HTML'
+                }
+            }
 
         }
+        
+        # Create stub articles in batches of 100
+        for ($i = 0; $i -lt $ArticlesToCreate.Count; $i += 100) {
+            $start = $i
+            $end = [Math]::Min($i + 99, $ArticlesToCreate.Count - 1)
+            $batch = @($ArticlesToCreate[$start..$end])
+
+            try {
+                $null = Invoke-NinjaOneRequest -InputObject $Batch -Method POST -Path 'knowledgebase/articles' -AsArray -ea Stop
+            } catch {
+                Write-Error "One or more items in the batch request failed $_"
+            }
+
+        }
+
+        # Retrieve all articles and match to what we expect
+        [System.Collections.Generic.List[PSCustomObject]]$AllKBArticles = @()
+        [System.Collections.Generic.List[PSCustomObject]]$OrgNinjaKBArticles = Invoke-NinjaOneRequest -Method GET -Path 'knowledgebase/organization/articles'
+        [System.Collections.Generic.List[PSCustomObject]]$GlobalNinjaKBArticles = Invoke-NinjaOneRequest -Method GET -Path 'knowledgebase/global/articles'
+
+        $AllKBArticles.AddRange($OrgNinjaKBArticles)
+        $AllKBArticles.AddRange($GlobalNinjaKBArticles)
+
+
+        foreach ($Article in $MatchedArticles | Where-Object { $_.ArticleType -eq 'HTML' }) {
+            $NinjaArticle = $AllKBArticles | Where-Object { $_.content.html -eq $Article.ITGID -and $_.isNinjaArticle -eq $True }
+
+            if (($NinjaArticle | Measure-Object).count -eq 1) {
+                $Article.NinjaOneID = $NinjaArticle.id
+                $Article.NinjaOneObject = $NinjaArticle
+                $Article.Imported = 'Stub-Created'
+            } else {
+                Write-Error "Failed to create $($Article.ITGID) - $($Article.name)"
+                $Article.Imported = 'Creation-Failed'
+            }
+        }
+
         $MatchedArticles | ConvertTo-Json -depth 100 | Out-File "$MigrationLogs\ArticleBase.json"
         $ManualActions | ConvertTo-Json -depth 100 | Out-File "$MigrationLogs\ManualActions.json"
         Write-TimedMessage -Timeout 3 -Message "Snapshot Point: Stub Articles Created Continue?"  -DefaultResponse "continue to Document/Article Bodies, please."
     }
 
 }
+
+# TEMP
+Read-Host 'Article Stub Pause'
 
 ############################### Documents / Articles Bodies ###############################
 
@@ -1753,7 +1889,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Articles.json")) {
         $Attachfiles = Get-ChildItem (Join-Path -Path $ITGLueExportPath -ChildPath "attachments\documents") -recurse
 
         # Now do the actual work of populating the content of articles
-        $ArticleErrors = foreach ($Article in $MatchedArticles) {
+        $ArticleErrors = foreach ($Article in $MatchedArticles | Where-Object {$_.ArticleType -eq 'HTML' -and $_.Imported -eq 'Stub-Created'}) {
 
             $page_out = ''
             $imagePath = $null
@@ -1761,6 +1897,8 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Articles.json")) {
             # Check for attachments
             $attachdir = $Attachfiles | Where-Object { $_.PSIsContainer -eq $true -and $_.Name -match $Article.ITGID }
             if ($Attachdir) {
+                # TODO - Loop folder and upload to related items.
+
                 $InFile = ''
                 $html = ''
                 $rawsource = ''
@@ -1768,13 +1906,13 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Articles.json")) {
                 $ManualLog = [PSCustomObject]@{
                     Document_Name = $Article.Name
                     Asset_Type    = "Article"
-                    Company_Name  = $Article.HuduObject.company_name
-                    HuduID        = $Article.HuduID
+                    Company_Name  = $Article.Company.company_name
+                    NinjaOneID        = $Article.NinjaOneID
                     Field_Name    = "N/A"
                     Notes         = "Attached Files not Supported"
                     Action        = "Manually Upload files to Related Files"
                     Data          = $attachdir.fullname
-                    Hudu_URL      = $Article.HuduObject.url
+                    NinjaOne_URL      = "https://$($NinjaOneBaseDomain)/#/systemDashboard/knowledgeBase/$($Article.NinjaOneID)/file"
                     ITG_URL       = "$ITGURL/$($Article.ITGLocator)"
                 }
                 $null = $ManualActions.add($ManualLog)
