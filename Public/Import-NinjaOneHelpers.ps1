@@ -312,7 +312,9 @@ function Invoke-UploadNinjaOneFile($FileName, $FilePath, $ContentType, $EntityTy
         } else {
             $URI = "https://$($Script:NinjaOneInstance)/ws/api/v2/attachments/temp/upload"
         }
+        write-host "$(Get-Date) - Starting upload"
         $Result = (Invoke-WebRequest -Uri $URI -Body $multipartContent -Method 'POST' -Headers @{Authorization = "Bearer $(($(Get-NinjaOneToken)).access_token)" }).content | ConvertFrom-Json -Depth 100
+        Write-host "$(Get-Date) - Upload finished"
         $FileStream.close()
         return $Result
     } catch {

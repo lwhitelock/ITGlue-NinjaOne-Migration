@@ -457,7 +457,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Locations.json")) {
 #Check for Website Resume
 if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Domains.json")) {
     Write-Host "Loading Previous Domains Migration"
-    $MatchedWebsites = Get-Content "$MigrationLogs\Domains.json" -raw | Out-String | ConvertFrom-Json
+    $MatchedDomains = Get-Content "$MigrationLogs\Domains.json" -raw | Out-String | ConvertFrom-Json
 } else {
 
     #Import Websites
@@ -480,7 +480,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Domains.json")) {
     $DomainMigrationName = "Domains"
 
     $DomainTemplate = [PSCustomObject]@{
-        name          = $DomainImportAssetLayoutName
+        name          = "$($FlexibleLayoutPrefix)$($DomainImportAssetLayoutName)"
         allowMultiple = $true
         fields        = @(
             [PSCustomObject]@{
@@ -1874,8 +1874,6 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\ArticleBase.json")) {
 
 }
 
-# TEMP
-Read-Host 'Article Stub Pause'
 
 ############################### Documents / Articles Bodies ###############################
 
@@ -1888,8 +1886,10 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Articles.json")) {
     if ($ImportArticles -eq $true) {
         $Attachfiles = Get-ChildItem (Join-Path -Path $ITGLueExportPath -ChildPath "attachments\documents") -recurse
 
+        [System.Collections.Generic.List[PSCustomObject]]$ArticlesToUpdate = @()
+
         # Now do the actual work of populating the content of articles
-        $ArticleErrors = foreach ($Article in $MatchedArticles | Where-Object {$_.ArticleType -eq 'HTML' -and $_.Imported -eq 'Stub-Created'}) {
+        $ArticleErrors = foreach ($Article in $MatchedArticles | Where-Object { $_.ArticleType -eq 'HTML' -and $_.Imported -eq 'Stub-Created' }) {
 
             $page_out = ''
             $imagePath = $null
@@ -1907,12 +1907,12 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Articles.json")) {
                     Document_Name = $Article.Name
                     Asset_Type    = "Article"
                     Company_Name  = $Article.Company.company_name
-                    NinjaOneID        = $Article.NinjaOneID
+                    NinjaOneID    = $Article.NinjaOneID
                     Field_Name    = "N/A"
                     Notes         = "Attached Files not Supported"
                     Action        = "Manually Upload files to Related Files"
                     Data          = $attachdir.fullname
-                    NinjaOne_URL      = "https://$($NinjaOneBaseDomain)/#/systemDashboard/knowledgeBase/$($Article.NinjaOneID)/file"
+                    NinjaOne_URL  = "https://$($NinjaOneBaseDomain)/#/systemDashboard/knowledgeBase/$($Article.NinjaOneID)/file"
                     ITG_URL       = "$ITGURL/$($Article.ITGLocator)"
                 }
                 $null = $ManualActions.add($ManualLog)
@@ -1933,7 +1933,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Articles.json")) {
                 $images = @($html.Images)
 
                 $images | ForEach-Object {
-                    
+                    $fullImgPath = $null
                     
                     if (($_.src -notmatch '^http[s]?://') -or ($_.src -match [regex]::Escape($ITGURL))) {
                         $script:HasImages = $true
@@ -1942,6 +1942,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Articles.json")) {
                         if ($_.src -match [regex]::Escape($ITGURL)) {
                             $matchedImage = Update-StringWithCaptureGroups -inputString $imgHTML -type 'img' -pattern $ImgRegexPatternToMatch
                             if ($matchedImage) {
+                                Write-Host 'Matched by regex'
                                 $tnImgUrl = $matchedImage.url
                                 $tnImgPath = $matchedImage.path
                             } else {
@@ -1949,14 +1950,13 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Articles.json")) {
                             }
                         } else {
                             $basepath = Split-Path $InFile
-                            
                             if ($fullImgUrl = $imgHTML.split('data-src-original="')[1]) { $fullImgUrl = $fullImgUrl.split('"')[0] }
                             $tnImgUrl = $imgHTML.split('src="')[1].split('"')[0]
                             if ($fullImgUrl) { $fullImgPath = Join-Path -Path $basepath -ChildPath $fullImgUrl.replace('/', '\') }
                             $tnImgPath = Join-Path -Path $basepath -ChildPath $tnImgUrl.replace('/', '\')
                         }
                         
-                        Write-Host "Processing IMG: $tnImgPath"
+                        Write-Host "Processing IMG: $($fullImgPath ?? $tnImgPath)"
                         
                         # Some logic to test for the original data source being specified vs the thumbnail. Grab the Thumbnail or final source.
                         if ($fullImgUrl -and ($foundFile = Get-Item -Path "$fullImgPath*" -ErrorAction SilentlyContinue)) {
@@ -1971,11 +1971,11 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Articles.json")) {
                                 Document_Name = $Article.Name
                                 Asset_Type    = "Article"
                                 Company_Name  = $Article.Company.CompanyName
-                                HuduID        = $Article.HuduID
+                                NinjaOneID    = $Article.NinjaOneID
                                 Notes         = 'Missing image, file not found'
                                 Actions       = "Neither $fullImgPath or $tnImgPath were found, validate the images exist in the export, or retrieve them from ITGlue directly"
                                 Data          = "$InFile"
-                                Hudu_URL      = $Article.HuduObject.url
+                                NinjaOne_URL  = "https://$($NinjaOneBaseDomain)/#/systemDashboard/knowledgeBase/$($Article.NinjaOneID)/file"
                                 ITG_URL       = "$ITGURL/$($Article.ITGLocator)"
                             }
 
@@ -1989,16 +1989,18 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Articles.json")) {
                                 Write-Warning "$imagePath is undetermined image. Testing..."
                                 if ($Magick = New-Object ImageMagick.MagickImage($imagePath)) {
                                     $OriginalFullImagePath = $imagePath
-                                    $imagePath = "$($imagePath).$($Magick.format)"
+                                    $imagePath = "$($imagePath).$(($Magick.format).ToLower())"
                                     $MovedItem = Move-Item -Path $OriginalFullImagePath -Destination $imagePath
                                 }
                             }                        
                             $imageType = Invoke-ImageTest($imagePath)
                             if ($imageType) {
-                                Write-Host "Uploading new image"
+                                Write-Host "Uploading new image $imagePath"
                                 try {
-                                    $UploadImage = New-HuduPublicPhoto -FilePath "$imagePath" -record_id $Article.HuduID -record_type 'Article'
-                                    $NewImageURL = $UploadImage.public_photo.url.replace($HuduBaseDomain, '')
+                                    $FileName = ([io.path]::GetFileName("$imagePath")).toLower()
+                                    $MimeType = Get-MimeType -Path "$imagePath"
+                                    $UploadImage = Invoke-UploadNinjaOneFile -FileName $FileName -FilePath "$imagePath" -ContentType $MimeType
+                                    $NewImageURL = "cid:$($UploadImage.contentId)"
                                     $ImgLink = $html.Links | Where-Object { $_.innerHTML -eq $imgHTML }
                                     Write-Host "Setting image to: $NewImageURL"
                                     $_.src = [string]$NewImageURL
@@ -2011,11 +2013,11 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Articles.json")) {
                                         Document_Name = $Article.Name
                                         Asset_Type    = "Article"
                                         Company_Name  = $Article.Company.CompanyName
-                                        HuduID        = $Article.HuduID
-                                        Notes         = 'Failed to Upload to Backend Storage'
-                                        Action        = "$imagePath failed to upload to Hudu backend with error $_`n Validate that uploads are working and you still have disk space."
+                                        NinjaOneID    = $Article.NinjaOneID
+                                        Notes         = 'Failed to Upload to NinjaOne'
+                                        Action        = "$imagePath failed to upload to NinjaOne with error $_"
                                         Data          = "$InFile"
-                                        Hudu_URL      = $Article.HuduObject.url
+                                        NinjaOne_URL  = "https://$($NinjaOneBaseDomain)/#/systemDashboard/knowledgeBase/$($Article.NinjaOneID)/file"
                                         ITG_URL       = "$ITGURL/$($Article.ITGLocator)"
                                     }
 
@@ -2032,11 +2034,11 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Articles.json")) {
                                     Document_Name = $Article.Name
                                     Asset_Type    = "Article"
                                     Company_Name  = $Article.Company.CompanyName
-                                    HuduID        = $Article.HuduID
+                                    NinjaOneID    = $Article.NinjaOneID
                                     Notes         = 'Image Not Detected'
                                     Action        = "$imagePath not detected as image, validate the identified file is an image, or imagemagick modules are loaded"        
                                     Data          = "$InFile"
-                                    Hudu_URL      = $Article.HuduObject.url
+                                    NinjaOne_URL  = "https://$($NinjaOneBaseDomain)/#/systemDashboard/knowledgeBase/$($Article.NinjaOneID)/file"
                                     ITG_URL       = "$ITGURL/$($Article.ITGLocator)"
                                 }
 
@@ -2050,11 +2052,11 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Articles.json")) {
                                 Asset_Type    = "Article"
                                 Company_Name  = $Article.Company.CompanyName
                                 Field_Name    = 'N/A'
-                                HuduID        = $Article.HuduID
+                                NinjaOneID    = $Article.NinjaOneID
                                 Notes         = 'Image File Missing'
-                                Action        = "$tnImgUrl is not present in export,validate the image exists in ITGlue and manually replace in Hudu"   
+                                Action        = "$tnImgUrl is not present in export,validate the image exists in ITGlue and manually replace in NinjaOne"   
                                 Data          = "$InFile"
-                                Hudu_URL      = $Article.HuduObject.url
+                                NinjaOne_URL  = "https://$($NinjaOneBaseDomain)/#/systemDashboard/knowledgeBase/$($Article.NinjaOneID)/file"
                                 ITG_URL       = "$ITGURL/$($Article.ITGLocator)"
                             }
 
@@ -2075,11 +2077,11 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Articles.json")) {
                     Asset_Type    = 'Article'
                     Company_Name  = $Article.Company.CompanyName
                     Field_Name    = 'N/A'
-                    HuduID        = $Article.HuduID                    
+                    NinjaOneID    = $Article.NinjaOneID                    
                     Notes         = 'Empty Document'
                     Action        = 'Validate the document is blank in ITGlue, or manually copy the content across. Note that embedded documents in ITGlue will be migrated in blank with an attachment of the original doc'
                     Data          = "$InFile"
-                    Hudu_URL      = $Article.HuduObject.url
+                    NinjaOne_URL  = "https://$($NinjaOneBaseDomain)/#/systemDashboard/knowledgeBase/$($Article.NinjaOneID)/file"
                     ITG_URL       = "$ITGURL/$($Article.ITGLocator)"
                 }
 
@@ -2087,27 +2089,32 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Articles.json")) {
             }
 			
 				
-            if ($_.company.InternalCompany -eq $false) {
-                $ArticleSplat = @{
-                    article_id = $Article.HuduID
-                    name       = $Article.name
-                    content    = $page_out
-                    company_id = $Article.company.HuduID                   
-                }	
-            } else {
-                $ArticleSplat = @{
-                    article_id = $Article.HuduID
-                    name       = $Article.name
-                    content    = $page_out
-                }	
+            $ArticleUpdate = @{
+                id      = $Article.NinjaOneID
+                name    = $Article.Name
+                content = @{
+                    html = ($page_out -replace '<HTML><HEAD></HEAD>\r\n<BODY>\r\n', '') -replace '</BODY></HTML>', ''
+                }
             }
-				
-            $null = Set-HuduArticle @ArticleSplat
-            Write-Host "$($Article.name) completed" -ForegroundColor Green
-		
-            $Article.Imported = "Created-By-Script"
+
+            try {
+                $UpdatedDoc = Invoke-NinjaOneRequest -InputObject $ArticleUpdate -Method PATCH -Path 'knowledgebase/articles' -AsArray -ea Stop
+                $Article.Imported = "Created-By-Script"
+                $Article.NinjaOneObject = $UpdatedDoc
+            } catch {
+                Write-Error "Creation Failed $_"
+                $Article.Imported = "Failed"
+            }
+
+            $ArticlesToUpdate.add($ArticleUpdate)            
 			
         } 
+
+        $ArticlesToUpdate | ConvertTo-Json -depth 100 | Out-File "$MigrationLogs\ArticlesToUpdate.json"
+
+
+        Read-Host 'Articles Complete'
+
 
         $MatchedArticles | ConvertTo-Json -depth 100 | Out-File "$MigrationLogs\Articles.json"
         $ArticleErrors | ConvertTo-Json -depth 100 | Out-File "$MigrationLogs\ArticleErrors.json"
@@ -2117,6 +2124,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Articles.json")) {
     }
 
 }
+
 
 
 ############################### Passwords ###############################
@@ -2177,13 +2185,13 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Passwords.json")) {
     foreach ($itgpassword in $PasswordsInCSV) {
         [void]$MatchedPasswords.Add(
             [PSCustomObject]@{
-                "Name"       = $itgpassword.attributes.name
-                "ITGID"      = $itgpassword.id
-                "HuduID"     = ""
-                "Matched"    = $false
-                "HuduObject" = ""
-                "ITGObject"  = $itgpassword
-                "Imported"   = ""
+                "Name"           = $itgpassword.attributes.name
+                "ITGID"          = $itgpassword.id
+                "NinjaOneID"     = ""
+                "Matched"        = $false
+                "NinjaOneObject" = ""
+                "ITGObject"      = $itgpassword
+                "Imported"       = ""
             }
         )
     }
@@ -2191,13 +2199,13 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Passwords.json")) {
         $FullPassword = (Get-ITGluePasswords -id $itgpassword.id -include related_items).data
         [void]$MatchedPasswords.Add(
             [PSCustomObject]@{
-                "Name"       = $itgpassword.attributes.name
-                "ITGID"      = $itgpassword.id
-                "HuduID"     = ""
-                "Matched"    = $false
-                "HuduObject" = ""
-                "ITGObject"  = $FullPassword
-                "Imported"   = ""
+                "Name"           = $itgpassword.attributes.name
+                "ITGID"          = $itgpassword.id
+                "NinjaOneID"     = ""
+                "Matched"        = $false
+                "NinjaOneObject" = ""
+                "ITGObject"      = $FullPassword
+                "Imported"       = ""
             }
         )
     }
@@ -2214,6 +2222,94 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Passwords.json")) {
 
         if (($importOption -eq "A") -or ($importOption -eq "S") ) {		
 
+            $PasswordCategories = ($MatchedPasswords.ITGObject.attributes.'password-category-name' | Select-Object -Unique | ForEach-Object {
+                    @{name = $_ }
+                }) ?? @()
+
+            $PasswordTemplateBody = [PSCustomObject]@{
+                name          = "$($FlexibleLayoutPrefix)$($PasswordImportAssetLayoutName)"
+                allowMultiple = $true
+                mandatory     = $false
+                fields        = @(
+                    [PSCustomObject]@{
+                        fieldLabel                = 'Category'
+                        fieldName                 = 'category'
+                        fieldType                 = 'DROPDOWN'
+                        fieldTechnicianPermission = 'EDITABLE'
+                        fieldScriptPermission     = 'NONE'
+                        fieldApiPermission        = 'READ_WRITE'
+                        fieldContent              = @{
+                            values   = $PasswordCategories
+                            required = $false
+                        }
+                    },
+                    [PSCustomObject]@{
+                        fieldLabel                = 'Username'
+                        fieldName                 = 'username'
+                        fieldType                 = 'TEXT'
+                        fieldTechnicianPermission = 'EDITABLE'
+                        fieldScriptPermission     = 'NONE'
+                        fieldApiPermission        = 'READ_WRITE'
+                        fieldContent              = @{
+                            required = $false
+                        }
+                    },
+                    [PSCustomObject]@{
+                        fieldLabel                = 'Password'
+                        fieldName                 = 'password'
+                        fieldType                 = 'TEXT_ENCRYPTED'
+                        fieldTechnicianPermission = 'EDITABLE'
+                        fieldScriptPermission     = 'NONE'
+                        fieldApiPermission        = 'READ_WRITE'
+                        fieldContent              = @{
+                            required         = $false
+                            advancedSettings = @{
+                                maxCharacters   = 10000
+                                complexityRules = @{
+                                    mustContainOneInteger           = $false
+                                    mustContainOneLowercaseLetter   = $false
+                                    mustContainOneUppercaseLetter   = $false
+                                    greaterOrEqualThanSixCharacters = $false
+                                }
+                            }
+                        }
+                    },
+                    [PSCustomObject]@{
+                        fieldLabel                = 'OTP Secret'
+                        fieldName                 = 'otpSecret'
+                        fieldType                 = 'TEXT_ENCRYPTED'
+                        fieldTechnicianPermission = 'EDITABLE'
+                        fieldScriptPermission     = 'NONE'
+                        fieldApiPermission        = 'READ_WRITE'
+                        fieldContent              = @{
+                            required         = $false
+                            advancedSettings = @{
+                                maxCharacters   = 10000
+                                complexityRules = @{
+                                    mustContainOneInteger           = $false
+                                    mustContainOneLowercaseLetter   = $false
+                                    mustContainOneUppercaseLetter   = $false
+                                    greaterOrEqualThanSixCharacters = $false
+                                }
+                            }
+                        }
+                    },
+                    [PSCustomObject]@{
+                        fieldLabel                = 'URL'
+                        fieldName                 = 'url'
+                        fieldType                 = 'URL'
+                        fieldTechnicianPermission = 'EDITABLE'
+                        fieldScriptPermission     = 'NONE'
+                        fieldApiPermission        = 'READ_WRITE'
+                        fieldContent              = @{
+                            required = $false
+                        }
+                    }
+                )
+            }
+
+            $PasswordTemplate = Invoke-NinjaOneDocumentTemplate -Template $PasswordTemplateBody
+
             foreach ($company in $CompaniesToMigrate) {
                 Write-Host "Migrating $($company.CompanyName)" -ForegroundColor Green
 
@@ -2223,7 +2319,6 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Passwords.json")) {
 
                     Write-Host "Starting $($unmatchedPassword.Name)"
 
-                    $PasswordableType = 'Asset'
                     $ParentItemID = $null
 		    
                     if ($($unmatchedPassword.ITGObject.attributes."resource-id")) {
@@ -2239,11 +2334,11 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Passwords.json")) {
                                     Field_Name    = $unmatchedPassword.ITGObject.attributes.name
                                     Asset_Type    = "Asset password field"
                                     Company_Name  = $unmatchedPassword.ITGObject."organization-name"
-                                    HuduID        = $unmatchedPassword.HuduID
+                                    NinjaOneID    = $unmatchedPassword.NinjaOneID
                                     Notes         = "Password from FA Field not found."
                                     Action        = "Manually create password"
                                     Data          = "Type: $($unmatchedPassword.ITGObject.attributes.`"resource-type`")"
-                                    Hudu_URL      = $FoundItem.HuduObject.url
+                                    NinjaOne_URL  = ""
                                     ITG_URL       = $unmatchedPassword.ITGObject.attributes."parent-url"
                                 }
                                 $null = $ManualActions.add($ManualLog)
@@ -2253,7 +2348,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Passwords.json")) {
                         } else {
                             # Check if it needs to link to websites
                             if ($($unmatchedPassword.ITGObject.attributes."resource-type") -eq "domains") {
-                                $ParentItemID = ($MatchedWebsites | Where-Object { $_.ITGID -eq $($unmatchedPassword.ITGObject.attributes."resource-id") }).HuduID
+                                $ParentItemID = ($MatchedDomains | Where-Object { $_.ITGID -eq $($unmatchedPassword.ITGObject.attributes."resource-id") }).NinjaOneID
                                 if ($ParentItemID) {
                                     Write-Host "Matched to $ParentItemID" -ForegroundColor Green
                                 } else {
@@ -2261,39 +2356,33 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Passwords.json")) {
                                     $ManualLog = [PSCustomObject]@{
                                         Document_Name = $unmatchedPassword.ITGObject.attributes.name
                                         Field_Name    = "N/A"
-                                        Asset_Type    = $unmatchedPassword.HuduObject.asset_type
-                                        Company_Name  = $unmatchedPassword.HuduObject.company_name
-                                        HuduID        = $unmatchedPassword.HuduID
+                                        Asset_Type    = 'Domains'
+                                        Company_Name  = $unmatchedPassword.ITGObject.attributes.'organization-name'
+                                        NinjaOneID    = $unmatchedPassword.NinjaOneID
                                         Notes         = "Password could not be related."
                                         Action        = "Manually relate password"
                                         Data          = "Type: $($unmatchedPassword.ITGObject.attributes.`"resource-type`")"
-                                        Hudu_URL      = $unmatchedPassword.HuduObject.url
+                                        NinjaOne_URL  = ""
                                         ITG_URL       = $unmatchedPassword.ITGObject.attributes."parent-url"
                                     }
                                     $null = $ManualActions.add($ManualLog)
                                 }
 
                             } else {
-                                # Deal with all others
-                                $ParentItemID = (Find-MigratedItem -ITGID $($unmatchedPassword.ITGObject.attributes."resource-id")).HuduID
-                                if ($ParentItemID) {
-                                    Write-Host "Matched to $ParentItemID" -ForegroundColor Green
-                                } else {
-                                    Write-Host "Could not find asset to Match. ParentID: $($unmatchedPassword.ITGObject.attributes.`"resource-id`")"
-                                    $ManualLog = [PSCustomObject]@{
-                                        Document_Name = $unmatchedPassword.ITGObject.attributes.name
-                                        Field_Name    = "N/A"
-                                        Asset_Type    = $unmatchedPassword.HuduObject.asset_type
-                                        Company_Name  = $unmatchedPassword.HuduObject.company_name
-                                        HuduID        = $unmatchedPassword.HuduID
-                                        Notes         = "Password could not be related."
-                                        Action        = "Manually relate password"
-                                        Data          = "Type: $($unmatchedPassword.ITGObject.attributes.`"resource-type`")"
-                                        Hudu_URL      = $unmatchedPassword.HuduObject.url
-                                        ITG_URL       = $unmatchedPassword.ITGObject.attributes."parent-url"
-                                    }
-                                    $null = $ManualActions.add($ManualLog)
+                                Write-Host "Could not find asset to Match. ParentID: $($unmatchedPassword.ITGObject.attributes.`"resource-id`")"
+                                $ManualLog = [PSCustomObject]@{
+                                    Document_Name = $unmatchedPassword.ITGObject.attributes.name
+                                    Field_Name    = "N/A"
+                                    Asset_Type    = "$($unmatchedPassword.ITGObject.attributes.'resource-type')"
+                                    Company_Name  = "$($unmatchedPassword.ITGObject.attributes.'organization-name')"
+                                    NinjaOneID    = $unmatchedPassword.NinjaOneID
+                                    Notes         = "Password could not be related."
+                                    Action        = "Manually relate password"
+                                    Data          = "Type: $($unmatchedPassword.ITGObject.attributes.`"resource-type`")"
+                                    NinjaOne_URL  = ""
+                                    ITG_URL       = $unmatchedPassword.ITGObject.attributes."parent-url"
                                 }
+                                $null = $ManualActions.add($ManualLog)                              
                             }
                         }
                     }
@@ -2313,47 +2402,37 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Passwords.json")) {
                         }
 
 
-                        $PasswordSplat = @{
-                            name              = "$($unmatchedPassword.ITGObject.attributes.name)"
-                            company_id        = $company.HuduCompanyObject.ID
-                            description       = $unmatchedPassword.ITGObject.attributes.notes
-                            passwordable_type = $PasswordableType
-                            passwordable_id   = $ParentItemID
-                            in_portal         = $false
-                            password          = $unmatchedPassword.ITGObject.attributes.password
-                            url               = if ($url = $unmatchedPassword.ITGObject.attributes.url) { $url } Else { $unmatchedPassword.ITGObject.attributes.'resource-url' }
-                            username          = $unmatchedPassword.ITGObject.attributes.username
-                            otpsecret         = $validated_otp
+                        $PasswordCreate = @{
+                            documentName        = "$($unmatchedPassword.ITGObject.attributes.name)"
+                            organizationId      = $company.NinjaOneID
+                            documentDescription = $unmatchedPassword.ITGObject.attributes.notes
+                            documentTemplateId  = $PasswordTemplate.id
+                            fields              = @{
+                                category  = $unmatchedPassword.ITGObject.attributes.'password-category-name'
+                                password  = $unmatchedPassword.ITGObject.attributes.password
+                                url       = if ($url = $unmatchedPassword.ITGObject.attributes.url) { $url } Else { $unmatchedPassword.ITGObject.attributes.'resource-url' }
+                                username  = $unmatchedPassword.ITGObject.attributes.username
+                                otpSecret = $validated_otp
+                            }
                         }
-                        if ([string]::IsNullOrWhiteSpace($unmatchedPassword.ITGObject.attributes.password) -or $unmatchedPassword.ITGObject.attributes.password.Length -lt 1) {
-                            $manualActions.add([PSCustomObject]@{
-                                    name              = "$($unmatchedPassword.ITGObject.attributes.name)"
-                                    company_id        = $company.HuduCompanyObject.ID
-                                    description       = $unmatchedPassword.ITGObject.attributes.notes
-                                    passwordable_type = $PasswordableType
-                                    passwordable_id   = $ParentItemID
-                                    in_portal         = $false
-                                    password          = ""
-                                    Hudu_URL          = $unmatchedPassword.HuduObject.url
-                                    ITG_URL           = if ($url = $unmatchedPassword.ITGObject.attributes.url) { $url } Else { $unmatchedPassword.ITGObject.attributes.'resource-url' }
-                                    username          = $unmatchedPassword.ITGObject.attributes.username
-                                    otpsecret         = "removed for security purposes"
-                                    problem           = "password was null or empty"
-                                })
-                            $unmatchedPassword.matched = $false
-                            Write-Warning "$($HuduNewPassword.Name) Has been skipped and added to manual actions due to being empty"                            
-                        } else {
-                            $HuduNewPassword = (New-HuduPassword @PasswordSplat).asset_password 
+
+                        try {
+                            $NewPassword = Invoke-NinjaOneRequest -InputObject $PasswordCreate -Method POST -Path 'organization/documents' -AsArray -ea Stop
                             $unmatchedPassword.matched = $true
-                            $unmatchedPassword.HuduID = $HuduNewPassword.id
-                            $unmatchedPassword."HuduObject" = $HuduNewPassword
+                            $unmatchedPassword.NinjaOneID = $NewPassword.id
+                            $unmatchedPassword.NinjaOneObject = $NewPassword
                             $unmatchedPassword.Imported = "Created-By-Script"
                             $ImportsMigrated = $ImportsMigrated + 1
-                            Write-host "$($HuduNewPassword.Name) Has been created in Hudu"
+                        } catch {
+                            $unmatchedPassword.Imported = "Failed"
                         }
+
+                        Write-host "$($NewPassword.Name) Has been created in NinjaOne"
                     }
                 }
+            
             }
+
         }
     } else {
         if ($UnmappedPasswordCount -eq 0) {
@@ -2554,7 +2633,7 @@ Started At: $ScriptStartTime <br />
 Completed At: $(Get-Date -Format "o") <br />
 $(($MatchedCompanies | Measure-Object).count) : Companies Migrated <br />
 $(($MatchedLocations | Measure-Object).count) : Locations Migrated <br />
-$(($MatchedWebsites | Measure-Object).count) : Websites Migrated <br />
+$(($MatchedDomains | Measure-Object).count) : Websites Migrated <br />
 $(($MatchedDevices | Measure-Object).count) : Configurations Migrated <br />
 $(($MatchedContacts | Measure-Object).count) : Contacts Migrated <br />
 $(($MatchedLayouts | Measure-Object).count) : Layouts Migrated <br />
@@ -2604,7 +2683,7 @@ Write-Host "Started At: $ScriptStartTime"
 Write-Host "Completed At: $(Get-Date -Format "o")"
 Write-Host "$(($MatchedCompanies | Measure-Object).count) : Companies Migrated" -ForegroundColor Green
 Write-Host "$(($MatchedLocations | Measure-Object).count) : Locations Migrated" -ForegroundColor Green
-Write-Host "$(($MatchedWebsites | Measure-Object).count) : Websites Migrated" -ForegroundColor Green
+Write-Host "$(($MatchedDomains | Measure-Object).count) : Websites Migrated" -ForegroundColor Green
 Write-Host "$(($MatchedDevices | Measure-Object).count) : Configurations Migrated" -ForegroundColor Green
 Write-Host "$(($MatchedContacts | Measure-Object).count) : Contacts Migrated" -ForegroundColor Green
 Write-Host "$(($MatchedLayouts | Measure-Object).count) : Layouts Migrated" -ForegroundColor Green

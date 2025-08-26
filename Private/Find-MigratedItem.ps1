@@ -16,7 +16,6 @@ function Find-MigratedItem {
     if (!$FoundItem) {
         $FoundItem = $MatchedLocations | Where-Object { $_.ITGID -eq $ITGID }
     }
-
 		
     return $FoundItem
 

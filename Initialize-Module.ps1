@@ -386,6 +386,9 @@ if ($InitType -eq 'Full') {
 
     $DomainImportAssetLayoutName = 'Domains'
 
+    ############################### Password Settings ###############################
+    $PasswordImportAssetLayoutName = 'Passwords'
+
     ############################### Configuration Settings ###############################\
     Write-Host "It is recommended to create devices in NinjaOne first, by either installing agents or monitoring them via NMS"
     Write-Host "Configurations will then be matched to device names"
