@@ -88,6 +88,18 @@ function Select-ObjectFromList($objects, $message, $allowNull = $false) {
     }
 }
 
+function Invoke-AddToArray($InputArray, $AppendItem) {
+    $ItemCount = ($AppendItem | Measure-Object).count
+    if ($ItemCount -eq 1) {
+        $InputArray.add($AppendItem)
+    } elseif ($ItemCount -gt 1 ) {
+        $InputArray.AddRange($AppendItem)
+    }
+
+    return $InputArray
+
+}
+
 function ConvertTo-CamelCase {
     param (
         [string]$InputString

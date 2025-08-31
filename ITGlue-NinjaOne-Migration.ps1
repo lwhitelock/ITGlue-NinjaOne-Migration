@@ -35,15 +35,8 @@ $FirstTimeLoad = 1
 # Find migrated items
 . $PSScriptRoot\Private\Find-MigratedItem.ps1
 
-# Lookup table to upgrade from Font Awesome 4 to 5
-. $PSScriptRoot\Private\Get-FontAwesomeMap.ps1
-$FontAwesomeUpgrade = Get-FontAwesomeMap
-
 # Add Replace URL functions
-. $PSScriptRoot\Private\ConvertTo-HuduURL.ps1
-
-# Add Hudu Relations Function
-. $PSScriptRoot\Public\Add-HuduRelation.ps1
+. $PSScriptRoot\Private\ConvertTo-NinjaOneURL.ps1
 
 # Add Timed (Noninteractive) Messages Helper
 . $PSScriptRoot\Public\Write-TimedMessage.ps1
@@ -114,7 +107,9 @@ if ((get-host).version.major -ne 7) {
   
 #Login to NinjaOne
 try {
+    Write-Host "Connecting to NinjaOne, please login via the web browser window that was launched and then return here"
     Connect-NinjaOne -NinjaOneInstance $NinjaOneBaseDomain -NinjaOneClientID $NinjaOneClientID -NinjaOneClientSecret $NinjaOneClientSecret -ea Stop
+    Write-Host "Successfully connected to NinjaOne"
 } catch {
     Write-Host "Failed to connect to NinjaOne: $_"
     exit 1
@@ -177,7 +172,6 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Companies.json")) {
     Write-Host "Fetching Companies from IT Glue" -ForegroundColor Green
     $CompanySelect = { (Get-ITGlueOrganizations -page_size 1000 -page_number $i).data }
     $ITGCompanies = Import-ITGlueItems -ItemSelect $CompanySelect
-    $ITGCompaniesFromCSV = Import-CSV (Join-Path -Path $ITGlueExportPath -ChildPath "organizations.csv")
 
     Write-Host "$($ITGCompanies.count) IT Glue Companies Found" 
     if ($ScopedMigration) {
@@ -1339,7 +1333,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Assets.json")) {
                         "Name"           = $ITGAsset.attributes.name
                         "ITGID"          = $ITGAsset.id
                         "NinjaOneID"     = $MatchedDocument.documentId
-                        "Matched"        = $false
+                        "Matched"        = $true
                         "NinjaOneObject" = $MatchedDocument
                         "ITGObject"      = $ITGAsset
                         "Imported"       = "First Pass"
@@ -1624,8 +1618,8 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\ArticleBase.json")) {
         [System.Collections.Generic.List[PSCustomObject]]$OrgNinjaKBArticles = Invoke-NinjaOneRequest -Method GET -Path 'knowledgebase/organization/articles'
         [System.Collections.Generic.List[PSCustomObject]]$GlobalNinjaKBArticles = Invoke-NinjaOneRequest -Method GET -Path 'knowledgebase/global/articles'
 
-        $AllKBArticles.AddRange($OrgNinjaKBArticles)
-        $AllKBArticles.AddRange($GlobalNinjaKBArticles)
+        $AllKBArticles = Invoke-AddToArray -InputArray $AllKBArticles -AppendItem $OrgNinjaKBArticles
+        $AllKBArticles = Invoke-AddToArray -InputArray $AllKBArticles -AppendItem $GlobalNinjaKBArticles
 
         $ITGDocuments = Import-CSV -Path (Join-Path -path $ITGLueExportPath -ChildPath "documents.csv")
         [string]$ITGDocumentsPath = Join-Path -path $ITGLueExportPath -ChildPath "Documents"
@@ -1850,8 +1844,8 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\ArticleBase.json")) {
         [System.Collections.Generic.List[PSCustomObject]]$OrgNinjaKBArticles = Invoke-NinjaOneRequest -Method GET -Path 'knowledgebase/organization/articles'
         [System.Collections.Generic.List[PSCustomObject]]$GlobalNinjaKBArticles = Invoke-NinjaOneRequest -Method GET -Path 'knowledgebase/global/articles'
 
-        $AllKBArticles.AddRange($OrgNinjaKBArticles)
-        $AllKBArticles.AddRange($GlobalNinjaKBArticles)
+        $AllKBArticles = Invoke-AddToArray -InputArray $AllKBArticles -AppendItem $OrgNinjaKBArticles
+        $AllKBArticles = Invoke-AddToArray -InputArray $AllKBArticles -AppendItem $GlobalNinjaKBArticles
 
 
         foreach ($Article in $MatchedArticles | Where-Object { $_.ArticleType -eq 'HTML' }) {
@@ -2343,7 +2337,7 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Passwords.json")) {
                                 }
                                 $null = $ManualActions.add($ManualLog)
                             } else {
-                                Write-Host "Migrated with Asset: $FoundItem.HuduID"
+                                Write-Host "Migrated with Asset: $($FoundItem.NinjaOneID)"
                             }
                         } else {
                             # Check if it needs to link to websites
@@ -2410,24 +2404,27 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Passwords.json")) {
                             fields              = @{
                                 category  = $unmatchedPassword.ITGObject.attributes.'password-category-name'
                                 password  = $unmatchedPassword.ITGObject.attributes.password
-                                url       = if ($url = $unmatchedPassword.ITGObject.attributes.url) { $url } Else { $unmatchedPassword.ITGObject.attributes.'resource-url' }
+                                url       = Convert-ToHttpsUrl($(if ($url = $unmatchedPassword.ITGObject.attributes.url) { $url } Else { $unmatchedPassword.ITGObject.attributes.'resource-url' }))
                                 username  = $unmatchedPassword.ITGObject.attributes.username
                                 otpSecret = $validated_otp
                             }
                         }
 
                         try {
-                            $NewPassword = Invoke-NinjaOneRequest -InputObject $PasswordCreate -Method POST -Path 'organization/documents' -AsArray -ea Stop
+                            $NewPassword = Invoke-NinjaOneRequest -InputObject $PasswordCreate -Method POST -Path 'organization/documents' -AsArray -ea Stop 
                             $unmatchedPassword.matched = $true
-                            $unmatchedPassword.NinjaOneID = $NewPassword.id
+                            $unmatchedPassword.NinjaOneID = $NewPassword.documentId
                             $unmatchedPassword.NinjaOneObject = $NewPassword
                             $unmatchedPassword.Imported = "Created-By-Script"
                             $ImportsMigrated = $ImportsMigrated + 1
+                            Write-host "$($NewPassword.documentName) Has been created in NinjaOne"
                         } catch {
+                            Write-Error "Error creating password: $($unmatchedPassword.ITGObject.attributes.name) $_"
+                            Write-Host "$($PasswordCreate | ConvertTo-Json -Depth 100)"
                             $unmatchedPassword.Imported = "Failed"
                         }
 
-                        Write-host "$($NewPassword.Name) Has been created in NinjaOne"
+                        
                     }
                 }
             
@@ -2449,130 +2446,108 @@ if ($ResumeFound -eq $true -and (Test-Path "$MigrationLogs\Passwords.json")) {
     Write-TimedMessage -Timeout 3 -Message "Snapshot Point: Passwords Finished. Continue?"  -DefaultResponse "continue to Document/Article Updates, please."
 }
 
-############################## Update ITGlue URLs on All Areas to Hudu #######################
-$UpdateArticles = (Get-HuduArticles | Where-Object { $_.content -like "*$ITGURL*" })
-$UpdateAssets = $MatchedAssets | Where-Object { $_.HuduObject.fields.value -like "*$ITGURL*" }
-$UpdatePasswords = $MatchedPasswords | Where-Object { $_.HuduObject.description -like "*$ITGURL*" }
-$UpdateAssetPasswords = $MatchedAssetPasswords | Where-Object { $_.ITGObject.attributes.notes -like "*$ITGURL*" }
-$UpdateCompanyNotes = $MatchedCompanies | Where-Object { $_.HuduCompanyObject.notes -like "*$ITGURL*" }
+############################## Update ITGlue URLs on All Areas to NinjaOne #######################
+# Fetch KB Articles
+Write-Host "Updating KB Articles and Apps and Services Documents with IT Glue URLs"
+[System.Collections.Generic.List[PSCustomObject]]$AllKBArticles = @()
+[System.Collections.Generic.List[PSCustomObject]]$OrgNinjaKBArticles = Invoke-NinjaOneRequest -Method GET -Path 'knowledgebase/organization/articles'
+[System.Collections.Generic.List[PSCustomObject]]$GlobalNinjaKBArticles = Invoke-NinjaOneRequest -Method GET -Path 'knowledgebase/global/articles'
 
+$AllKBArticles = Invoke-AddToArray -InputArray $AllKBArticles -AppendItem $OrgNinjaKBArticles
+$AllKBArticles = Invoke-AddToArray -InputArray $AllKBArticles -AppendItem $GlobalNinjaKBArticles
+
+$AllKBArticles = $AllKBArticles | Where-Object { $_.content.html -like "*$ITGURL*" }
+
+# Fetch Assets
+$UpdateDocuments = Invoke-NinjaOneRequest -Method GET -Path 'organization/documents' | Where-Object { $_.fields.value -like "*$ITGURL*" }
 
 # Articles
-$articlesUpdated = @()
-foreach ($articleFound in $UpdateArticles) {
-    if ($NewContent = Update-StringWithCaptureGroups -inputString $articleFound.content -pattern $RichRegexPatternToMatchSansAssets -type "rich") {
+[System.Collections.Generic.List[PSCustomObject]]$articlesUpdated = @()
+foreach ($articleFound in $AllKBArticles) {
+    if ($NewContent = Update-StringWithCaptureGroups -inputString $articleFound.content.html -pattern $RichRegexPatternToMatchSansAssets -type "rich") {
         $NewContent = Update-StringWithCaptureGroups -inputString $NewContent -pattern $RichRegexPatternToMatchWithAssets -type "rich"
         $NewContent = Update-StringWithCaptureGroups -inputString $NewContent -pattern $RichDocLocatorUrlPatternToMatch -type "rich"
         $NewContent = Update-StringWithCaptureGroups -inputString $NewContent -pattern $RichDocLocatorRelativeURLPatternToMatch -type "rich"
         Write-Host "Updating Article $($articleFound.name) with replaced Content" -ForegroundColor 'Green'
+
+        $ArticleUpdate = @{
+            id      = $articleFound.id
+            name    = $articleFound.Name
+            content = @{
+                html = $NewContent
+            }
+        }
+
         try {
-            $ArticlePost = Set-HuduArticle -Name $articleFound.name -id $articleFound.id -Content $NewContent -ErrorAction Stop
-            $articlesUpdated = $articlesUpdated + @{"status" = "replaced"; "original_article" = $articleFound; "updated_article" = $ArticlePost }
-        } catch { $articlesUpdated = $articlesUpdated + @{"status" = "failed"; "original_article" = $articleFound; "attempted_changes" = $newContent } }
+            $UpdatedDoc = Invoke-NinjaOneRequest -InputObject $ArticleUpdate -Method PATCH -Path 'knowledgebase/articles' -AsArray -ea Stop
+            $articlesUpdated.add(@{"status" = "replaced"; "original_article" = $articleFound; "updated_article" = $UpdatedDoc })
+        } catch {
+            Write-Error "Creation Failed $_"
+            $articlesUpdated.add(@{"status" = "failed"; "original_article" = $articleFound; "attempted_changes" = $newContent })
+        }
+
     } else {
         Write-Warning "Article $articleFound.id found ITGlue URL but didn't match"
-        $articlesUpdated = $articlesUpdated + @{"status" = "clean"; "original_article" = $articleFound }
+        $articlesUpdated = $articlesUpdated.add(@{"status" = "clean"; "original_article" = $articleFound })
     }
 }
 
 $articlesUpdated | ConvertTo-Json -depth 100 | Out-file "$MigrationLogs\ReplacedArticlesURL.json"
 Write-TimedMessage -Timeout 3 -Message "Snapshot Point: Article URLs Replaced. Continue?"  -DefaultResponse "continue to Assets, please."
 
-# Assets
-$assetsUpdated = @()
-foreach ($assetFound in $UpdateAssets.HuduObject) {
+# Apps and Services Documents
+[System.Collections.Generic.List[PSCustomObject]]$documentsUpdated = @()
+foreach ($documentFound in $UpdateDocuments) {
     $replacedStatus = 'clean'
-    $customFields = @()
+    [PSCustomObject]$UpdateFields = @{}
 
-    foreach ($field in $assetFound.fields) {
-        # Convert the caption to snake_case to match API expectations for 2.37.1
-        $label = ($field.caption -replace '[^\w\s]', '') -replace '\s+', '_' | ForEach-Object { $_.ToLower() }
+    foreach ($field in $documentFound.fields) {
+        $label = $field.name
 
-        if ($label -in @('itglue_url', 'itglue_id', 'imported_from_itglue') -and $field.value -like "*$ITGURL*") {
-            $NewContent = Update-StringWithCaptureGroups -inputString $field.value -pattern $RichRegexPatternToMatchSansAssets -type "rich"
-            $NewContent = Update-StringWithCaptureGroups -inputString $NewContent -pattern $RichRegexPatternToMatchWithAssets -type "rich"
+        if ($label -ne 'itgUrl' -and $field.value -like "*$ITGURL*") {
+            if ($field.value.html) {
+                $NewContent = Update-StringWithCaptureGroups -inputString $field.value.html -pattern $RichRegexPatternToMatchSansAssets -type "rich"
+                $NewContent = Update-StringWithCaptureGroups -inputString $NewContent -pattern $RichRegexPatternToMatchWithAssets -type "rich"
+            } else {
+                $NewContent = Update-StringWithCaptureGroups -inputString $field.value -pattern $RichRegexPatternToMatchSansAssets -type "rich"
+                $NewContent = Update-StringWithCaptureGroups -inputString $NewContent -pattern $RichRegexPatternToMatchWithAssets -type "rich"  
+            }
 
             if ($NewContent -and $NewContent -ne $field.value) {
-                Write-Host "Replacing Asset $($assetFound.name) field $($field.caption) with updated content" -ForegroundColor 'Red'
-                $customFields += @{ $label = $NewContent }
+                Write-Host "Replacing Document $($documentFound.documentName) field $($field.name) with updated content"
+                if ($field.value.html) {
+                    $UpdateFields | Add-Member -NotePropertyName $label -NotePropertyValue @{html = $NewContent }
+                } else {
+                    $UpdateFields | Add-Member -NotePropertyName $label -NotePropertyValue $NewContent
+                }
                 $replacedStatus = 'replaced'
-            } else {
-                $customFields += @{ $label = $field.value }
             }
-        } else {
-            # For other fields, preserve existing value (optional)
-            $customFields += @{ $label = $field.value }
         }
     }
 
     if ($replacedStatus -eq 'replaced') {
-        Write-Host "Updating Asset $($assetFound.name) with new custom_fields array" -ForegroundColor 'Green'
-        $AssetPost = Invoke-HuduRequest -Method PUT -Resource "api/v1/companies/$($assetFound.company_id)/assets/$($assetFound.id)" -Body @{
-            name            = $assetFound.name
-            asset_layout_id = $assetFound.asset_layout_id
-            custom_fields   = $customFields
+        Write-Host "Updating Document $($documentFound.documentName) with new custom_fields array" -ForegroundColor 'Green'
+        try {
+            $DocUpdate = @{
+                documentId   = $documentFound.documentId
+                documentName = $documentFound.documentName
+                fields       = $UpdateFields
+            }
+            $null = Invoke-NinjaOneRequest -InputObject $DocUpdate -Method PATCH -Path 'organization/documents' -AsArray -ea Stop
+        } catch {
+            Write-Error "Failed to update Document $_"
+            Write-Host "$($DocUpdate | ConvertTo-Json)"
         }
     }
 
-    $assetsUpdated += @{
-        status         = $replacedStatus
-        original_asset = $originalAsset
-        updated_asset  = $AssetPost.asset
-    }
+    $documentsUpdated.add($documentFound)
 }
-$assetsUpdated | ConvertTo-Json -depth 100 | Out-file "$MigrationLogs\ReplacedAssetsURL.json"
-Write-TimedMessage -Timeout 3 -Message  "Snapshot Point: Assets URLs Replaced. Continue?" -DefaultResponse "continue to Passwords Matching, please."
+$documentsUpdated | ConvertTo-Json -depth 100 | Out-file "$MigrationLogs\ReplacedDocumentsURL.json"
+Write-TimedMessage -Timeout 3 -Message  "Snapshot Point: Document URLs Replaced. Continue?" -DefaultResponse "continue to Passwords Matching, please."
 
-# Passwords
-$passwordsUpdated = @()
-foreach ($passwordFound in $UpdatePasswords.HuduObject) {
-    $NewContent = Update-StringWithCaptureGroups -inputString $passwordFound.description -pattern $TextRegexPatternToMatchSansAssets -type "plain"
-    $NewContent = Update-StringWithCaptureGroups -inputString $NewContent -pattern $TextRegexPatternToMatchWithAssets -type "plain"
-    if ($NewContent) {
-        Write-Host "Updating Password $($passwordFound.name) with updated description" -ForegroundColor 'Green'
-        $passwordsUpdated = $passwordsUpdated + @{"original_password" = $passwordFound; "updated_password" = (Set-HuduPassword -id $passwordFound.id -Description $NewContent).asset_password }
-    }
-}
-$passwordsUpdated | ConvertTo-Json -depth 100 | Out-file "$MigrationLogs\ReplacedPasswordsURL.json"
-Write-TimedMessage -Timeout 3 -Message  "Snapshot Point: Password URLs Replaced. Continue?"  -DefaultResponse "continue to Asset Passwords Matching, please."
 
-# Asset Passwords
-$assetPasswordsUpdated = @()
-foreach ($passwordFound in $UpdateAssetPasswords) {
-    $passwordFound = Get-HuduPasswords -id $passwordFound.HuduID
-    $NewContent = Update-StringWithCaptureGroups -inputString $passwordFound.description -pattern $TextRegexPatternToMatchSansAssets -type "plain"
-    $NewContent = Update-StringWithCaptureGroups -inputString $NewContent -pattern $TextRegexPatternToMatchWithAssets -type "plain"
-    if ($NewContent) {
-        Write-Host "Updating Asset Password $($passwordFound.name) with updated description" -ForegroundColor 'Green'
-        $assetPasswordsUpdated = $assetPasswordsUpdated + @{"original_password" = $passwordFound; "updated_password" = (Set-HuduPassword -Id $passwordFound.id -Description $NewContent).asset_password }
-    }
-    
-}
-$assetPasswordsUpdated | ConvertTo-Json -depth 100 | Out-file "$MigrationLogs\ReplacedAssetPasswordsURL.json"
-Write-TimedMessage -Timeout 3 -Message  "Snapshot Point: Asset Passwords URLs Replaced. Continue?"  -DefaultResponse "continue to Company Notes, please."
-
-# Company Notes
-$companyNotesUpdated = @()
-foreach ($companyFound in $UpdateCompanyNotes.HuduCompanyObject) {
-    $NewContent = Update-StringWithCaptureGroups -inputString $companyFound.notes -pattern $RichRegexPatternToMatchSansAssets -type "rich"
-    $NewContent = Update-StringWithCaptureGroups -inputString $NewContent -pattern $RichRegexPatternToMatchWithAssets -type "rich"
-    if ($NewContent) {
-        Write-Host "Updating Company $($companyFound.name) with updated notes" -ForegroundColor 'Green'
-        $companyNotesUpdated = $companyNotesUpdated + @{"original_company" = $companyFound; "updated_company" = (Set-HuduCompany -id $companyFound.id -Notes $NewContent).company }
-    }
-
-}
-$companyNotesUpdated | ConvertTo-Json -depth 100 | Out-file "$MigrationLogs\ReplacedCompaniesURL.json"
-Write-TimedMessage -Timeout 3 -Message "Snapshot Point: Company Notes URLs Replaced. Continue?"  -DefaultResponse "continue to Manual Actions, please."
 
 ############################### Generate Manual Actions Report ###############################
-
-$ManualActions | ForEach-Object {
-    if ($_.Hudu_URL -notmatch "http:" -and $_.Hudu_URL -notmatch "https:") {
-        $_.Hudu_URL = "$HuduBaseDomain$($_.Hudu_URL)"
-    }
-}
-
 
 $Head = @"
 <html>
@@ -2580,7 +2555,7 @@ $Head = @"
 <Title>Manual Actions Required Report</Title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.1/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-+0n0xVW2eSR5OomGNYDnhzAbDsOXxcvSN1TPprVMTNDbiYZCxYbOOl7+AMvyTG2x" crossorigin="anonymous">
 <style type="text/css">
-<!–
+<!-
 body {
     font-family: Verdana, Geneva, Arial, Helvetica, sans-serif;
 }
@@ -2647,15 +2622,15 @@ If you found this script useful please consider sponsoring me at: <a href=https:
 
 $footer = "</div></body></html>"
 
-$UniqueItems = $ManualActions | Select-Object huduid, hudu_url -unique
+$UniqueItems = $ManualActions | Select-Object ninjaoneid, ninjaone_url -unique
 
 $ManualActionsReport = foreach ($item in $UniqueItems) {
-    $items = $ManualActions | where-object { $_.huduid -eq $item.huduid -and $_.hudu_url -eq $item.Hudu_url }
+    $items = $ManualActions | where-object { $_.NinjaOneid -eq $item.ninjaoneid -and $_.NinjaOne_url -eq $item.NinjaOne_url }
     $core_item = $items | Select-Object -First 1
     $Header = "<h2><strong>Name: $($core_item.Document_Name)</strong></h2>
 				<h2>Type: $($core_item.Asset_Type)</h2>
 				<h2>Company: $($core_item.Company_name)</h2>
-				<h2>Hudu URL: <a href=$($core_item.Hudu_URL)>$($core_item.Hudu_URL)</a></h2>
+				<h2>NinjaOne URL: <a href=$($core_item.NinjaOne_URL)>$($core_item.NinjaOne_URL)</a></h2>
 				<h2>IT Glue URL: <a href=$($core_item.ITG_URL)>$($core_item.ITG_URL)</a></h2>
 				"
     $Actions = $items | Select-Object Field_Name, Notes, Action, Data | ConvertTo-Html -fragment | Out-String

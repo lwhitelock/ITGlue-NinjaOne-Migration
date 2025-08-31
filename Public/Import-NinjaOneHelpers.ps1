@@ -113,6 +113,33 @@ function Get-OAuthCode {
     Return $Result
 }
 
+function Convert-ToHttpsUrl {
+    param(
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
+        [string]$Url
+    )
+
+    process {
+        # Trim whitespace
+        $Url = $Url.Trim()
+
+        # If it already starts with https://, return as-is
+        if ($Url -match '^https://') {
+            return $Url
+        }
+
+        # If it starts with http://, replace with https://
+        elseif ($Url -match '^http://') {
+            return $Url -replace '^http://', 'https://'
+        }
+
+        # If no scheme is provided, prepend https://
+        else {
+            return "https://$Url"
+        }
+    }
+}
+
 function Connect-NinjaOne {
     [CmdletBinding()]
     param (
