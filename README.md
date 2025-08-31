@@ -1,6 +1,7 @@
 # IT Glue to NinjaOne Documentation Migration
 # Read first
-Please read the documentation for the script which can be found here before running: 
+Please read the documentation for the script which can be found here before running:
+
 https://docs.mspp.io/ninjaone-it-glue-to-ninjaone-documentation-migration
 
 ## License note
