@@ -61,11 +61,6 @@ Write-Host "#          Date: 09/08/2025                               #" -Foregr
 Write-Host "#                                                         #" -ForegroundColor Green
 Write-Host "#          Author: Luke Whitelock                         #" -ForegroundColor Green
 Write-Host "#                  https://mspp.io                        #" -ForegroundColor Green
-Write-Host "#   Contributors to orginal Hudu Verion:                  #" -ForegroundColor Green
-Write-Host "#                            John Duprey                  #" -ForegroundColor Green
-Write-Host "#                            Mendy Green                  #" -ForegroundColor Green
-Write-Host "#                  https://MSPGeek.org                    #" -ForegroundColor Green
-Write-Host "#                  https://mendyonline.com                #" -ForegroundColor Green
 Write-Host "#                                                         #" -ForegroundColor Green
 Write-Host "##########################################################" -ForegroundColor Green
 Write-Host "# Note: This is an unofficial script, please do not       #" -ForegroundColor Green
@@ -73,10 +68,10 @@ Write-Host "# contact NinjaOne support if you run into issues.        #" -Foregr
 Write-Host "# For support please visit the NinjaOne Discord           #" -ForegroundColor Green
 Write-Host "# https://discord.gg/NinjaOne                             #" -ForegroundColor Green
 Write-Host "# Or log an issue in the Github Respository:              #" -ForegroundColor Green
-Write-Host "# https://github.com/lwhitelock/ITGlue-NinjaONe-Migration #" -ForegroundColor Green
+Write-Host "# https://github.com/lwhitelock/ITGlue-NinjaOne-Migration #" -ForegroundColor Green
 Write-Host "#######################################################" -ForegroundColor Green
 Write-Host " Instructions:                                       " -ForegroundColor Green
-Write-Host " Please view Luke's blog post:                       " -ForegroundColor Green
+Write-Host " Please view the documentation here:                       " -ForegroundColor Green
 Write-Host " https://mspp.io/automated-it-glue-to-ninjaone-migration-script/     " -ForegroundColor Green
 Write-Host " for detailed instructions                           " -ForegroundColor Green
 Write-Host "#######################################################" -ForegroundColor Green
