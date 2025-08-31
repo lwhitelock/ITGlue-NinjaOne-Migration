@@ -2615,7 +2615,6 @@ $(($MatchedLayouts | Measure-Object).count) : Layouts Migrated <br />
 $(($MatchedAssets | Measure-Object).count) : Assets Migrated <br />
 $(($MatchedArticles | Measure-Object).count) : Articles Migrated <br />
 $(($MatchedPasswords | Measure-Object).count) : Passwords Migrated <br />
-If you found this script useful please consider sponsoring me at: <a href=https://github.com/sponsors/lwhitelock?frequency=one-time>https://github.com/sponsors/lwhitelock?frequency=one-time</a>
 <hr>
 <h1>Manual Actions Required Report</h1>
 "@
